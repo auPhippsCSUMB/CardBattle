@@ -8,10 +8,11 @@ cards, either from a specific parameter, all cards, or random card. A client app
 API if they plan on using our app to create, trade, and battle cards as their own user.
 
 ## 2. Resources
-| Resource | Key fields | Relationships |
-|---|---|---|
-| User | id, email, displayName, role | a User has many Workouts |
-| ... | ... | ... |
+| Resource   | Key fields                            | Relationships                        | 
+|------------|---------------------------------------|--------------------------------------|
+| User       | id, email, displayName, role, isAdmin | Each user owns 0 to many cards       |
+| Card       | id, name, imgURL, description, likes  | Each card belongs to 0 to many users |
+| Attributes | id, name, value,                      | Each card has 0 to many attributes   |
 
 ## 3. ER sketch
 Tables, primary and foreign keys, and cardinality. Edit this Mermaid diagram (it renders on GitHub;
