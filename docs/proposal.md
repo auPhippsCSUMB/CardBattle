@@ -58,6 +58,15 @@ gradle for both API and Android builds. We will try to run both skeleton builds 
 application of rules per folder instead of per-repo.
 
 ## 7. Team and Sprint 1
-Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone.
-- Who Owns: Austin Phipps (auPhippsCSUMB)
+Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone. (FEEL FREE TO REPEAT ALREADY OWNED THINGS __DELETE WHEN READ)
+- What Austin owns:
+    - API endroutes and openapi.yaml
+- What Michael owns:
+    - 
+- What Fernando owns:
+    - 
+- What Gideon owns:
+    - 
+- [Project Board](https://github.com/users/auPhippsCSUMB/projects/1)
+- [Sprint 1](https://github.com/auPhippsCSUMB/CardBattle/milestone/22)
 
