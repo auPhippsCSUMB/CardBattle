@@ -4,19 +4,19 @@
 # Lint it:     npx @redocly/cli lint docs/openapi.yaml
 # Mock it:     npx @stoplight/prism-cli mock docs/openapi.yaml   -> http://127.0.0.1:4010
 openapi: 3.0.3
-
+# TODO: Add your own contact info, and change the title/description/license if you want.
 info:
-  title: Workout Tracker API
+  title: Card Receiver API
   version: 1.0.0
   description: |
-    Example contract for a workout tracker. Users log workouts made of exercises.
+    Example contract for a card receiver. Users log cards made of attributes.
     Every error uses RFC 9457 Problem Details (see components/schemas/Problem).
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   contact:
-    name: Team 00
-    url: https://github.com/OWNER/REPO
+    name: Group 5
+    url: https://github.com/auPhippsCSUMB/CardBattle
 
 servers:
   - url: http://localhost:8080
@@ -29,15 +29,16 @@ security:
   - bearerAuth: []
 
 tags:
-  - name: Workouts
+  - name: Cards
     description: A user's own workouts
-  - name: Exercises
-    description: The shared exercise catalog
+  - name: Attributes
+    description: A card's attributes (public catalog)
   - name: Users
     description: The signed-in user's own account
   - name: Admin
     description: Admin-only user management
 
+#TODO: Add your own endpoints, schemas, and responses. The examples below are for a workout tracker.
 paths:
   /api/v1/workouts:
     get:
