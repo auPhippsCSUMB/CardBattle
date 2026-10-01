@@ -34,10 +34,22 @@ erDiagram
 ```
 
 ## 4. Endpoints
-| Verb | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | /api/v1/workouts?page=0&size=20 | user | list my workouts (paginated) |
-| ... | ... | ... | ... |
+    ___________________________________________________________________________________
+    | Verb   | Path                             | Auth | Purpose                      |
+    | ---    |                                  |      |                              |
+    | GET    | /api/v1/users?page=0&size=20     | user | list all users (paginated)   |
+    | GET    | /api/v1/cards?page=0&size=20     | user | list my cards (paginated)    |
+    | GET    | /api/v1/allCards?page=0&size=20  | user | list all cards (paginated)   |
+    | POST   | /api/v1/randomCard               | user | get a random card            |
+    | POST   | /api/v1/users                    | user | create a user                |
+    | PATCH  | /api/v1/users                    | user | edit my user                 |
+    | GET    | /api/v1/users?displayname="drc"  | user | get a user                   |
+    | POST   | /api/v1/cards                    | user | create a card                |
+    | PATCH  | /api/v1/cards?name="FIREBALL!!!" | user | edit a card user owns        |
+    | DELETE | /api/v1/cards?name="FIREBALL!!!" | user | delete a card user owns      |
+    | DELETE | /api/v1/users/me                 | user | delete your user             |
+    | ...    | ...                              | ...  | ...                          |
+    |________|__________________________________|______|______________________________|
 Mark each endpoint `public`, `user`, or `admin`. Mark which collection paginates and which
 filters or sorts.
 
