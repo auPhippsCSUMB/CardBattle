@@ -553,7 +553,7 @@ components:
           $ref: '#/components/schemas/PageMeta'
 
     Problem:
-      description: RFC 9457 Problem Details. The ONE error body every endpoint returns.
+      description: RFC 9457 Problem Details. This is the single error body returned by every endpoint.
       type: object
       required: [title, status]
       properties:
@@ -568,14 +568,14 @@ components:
           example: 404
         detail:
           type: string
-          example: Workout 42 not found
+          example: Card 42 not found for this user
         instance:
           type: string
-          example: /api/v1/workouts/42
+          example: /api/v1/cards/42
 
   responses:
     BadRequest:
-      description: Validation failed or malformed JSON
+      description: Validation failed or malformed JSON.
       content:
         application/problem+json:
           schema:
@@ -585,7 +585,7 @@ components:
             status: 400
             detail: One or more fields failed validation. Check the request against the contract.
     Unauthorized:
-      description: Missing or invalid token
+      description: Missing or invalid token.
       content:
         application/problem+json:
           schema:
@@ -593,8 +593,9 @@ components:
           example:
             title: Unauthorized
             status: 401
+            detail: Authentication required.
     Forbidden:
-      description: Valid token, but not allowed (for example, not an admin)
+      description: Valid token, but not allowed for this action (for example, not an admin).
       content:
         application/problem+json:
           schema:
@@ -602,8 +603,9 @@ components:
           example:
             title: Forbidden
             status: 403
+            detail: You do not have permission to perform this action.
     NotFound:
-      description: Doesn't exist, or belongs to someone else
+      description: Resource does not exist or belongs to someone else.
       content:
         application/problem+json:
           schema:
@@ -611,9 +613,9 @@ components:
           example:
             title: Not Found
             status: 404
-            detail: Workout 42 not found
+            detail: Card 42 not found for this user
     InternalError:
-      description: Unexpected server error. Your app still needs to show something useful.
+      description: Unexpected server error. The app still needs to show something useful.
       content:
         application/problem+json:
           schema:
@@ -621,3 +623,4 @@ components:
           example:
             title: Internal Server Error
             status: 500
+            detail: An unexpected error occurred. Please try again later.
