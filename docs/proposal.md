@@ -8,11 +8,15 @@ cards, either from a specific parameter, all cards, or random card. A client app
 API if they plan on using our app to create, trade, and battle cards as their own user.
 
 ## 2. Resources
-| Resource   | Key fields                            | Relationships                        | 
-|------------|---------------------------------------|--------------------------------------|
-| User       | id, email, displayName, role, isAdmin | Each user owns 0 to many cards       |
-| Card       | id, name, imgURL, description, likes  | Each card belongs to 0 to many users |
-| Attributes | id, name, value,                      | Each card has 0 to many attributes   |
+| Resource       | Key fields                                                           | Relationships                                      |
+| -------------- | -------------------------------------------------------------------- | -------------------------------------------------- |
+| User           | id, email, displayName, role, password, isAdmin                      | Each user owns 0 to many cards, decks, and wins    |
+| Card           | id, name, imgURL, description, type, author(fk)                      | Each card is authored by one user                  |
+| User_owns_card | id, userId(fk), cardId(fk), value                                    | Each card is owned by one to many users            |
+| Deck           | id, userId(fk), name                                                 | Each deck is created by one user                   |
+| Card_in_deck   | id, cardId(fk), deckId(fk), userId(fk), type(fk)                     | Each card belongs to one to many decks             |
+| Wins           | id, winningUser(fk), losingUser(fk), winningCard(fk), losingCard(fk) | Each user and card has one to many wins and losses |
+
 
 ## 3. ER sketch
 Tables, primary and foreign keys, and cardinality. Edit this Mermaid diagram (it renders on GitHub;
@@ -20,36 +24,90 @@ try changes at https://mermaid.live):
 
 ```mermaid
 erDiagram
-    USER ||--o{ THING : owns
-    USER {
-        bigint id PK
-        string email UK
+    User {
+        INT id PK
+        VARCHAR(255) email
+        VARCHAR(100) displayName
+        VARCHAR(50) role
+        VARCHAR(255) password
+        BOOLEAN isAdmin
     }
-    THING {
-        bigint id PK
-        bigint user_id FK
-        string name
-        string notes "nullable"
+
+    Card {
+        INT id PK
+        VARCHAR(150) name
+        VARCHAR(500) imgURL
+        TEXT description
+        VARCHAR(50) type
+        INT author FK
     }
+
+    Attributes {
+        INT id PK
+        INT cardId FK
+        VARCHAR(100) name
+        VARCHAR(255) value
+    }
+
+    User_owns_card {
+        INT id PK
+        INT userId FK
+        INT cardId FK
+        INT value
+    }
+
+    Deck {
+        INT id PK
+        INT userId FK
+        VARCHAR(150) name
+    }
+
+    Card_in_deck {
+        INT id PK
+        INT cardId FK
+        INT deckId FK
+        INT userId FK
+        VARCHAR(50) type
+    }
+
+    Wins {
+        INT id PK
+        INT winningUser FK
+        INT losingUser FK
+        INT winningCard FK
+        INT losingCard FK
+    }
+
+    User ||--o{ Card : authors
+    User ||--o{ User_owns_card : owns
+    Card ||--o{ User_owns_card : owned_as
+    User ||--o{ Deck : creates
+    Deck ||--o{ Card_in_deck : contains
+    User ||--o{ Card_in_deck : uses
+    User_owns_card ||--o{ Card_in_deck : selected_card
+    User ||--o{ Wins : winning_user
+    User ||--o{ Wins : losing_user
+    User_owns_card ||--o{ Wins : winning_card
+    User_owns_card ||--o{ Wins : losing_card
 ```
 
 ## 4. Endpoints
-    ___________________________________________________________________________________
-    | Verb   | Path                             | Auth | Purpose                      |
-    | ---    |                                  |      |                              |
-    | GET    | /api/v1/users?page=0&size=20     | user | list all users (paginated)   |
-    | GET    | /api/v1/cards?page=0&size=20     | user | list my cards (paginated)    |
-    | GET    | /api/v1/allCards?page=0&size=20  | user | list all cards (paginated)   |
-    | POST   | /api/v1/randomCard               | user | get a random card            |
-    | POST   | /api/v1/users                    | user | create a user                |
-    | PATCH  | /api/v1/users                    | user | edit my user                 |
-    | GET    | /api/v1/users?displayname="drc"  | user | get a user                   |
-    | POST   | /api/v1/cards                    | user | create a card                |
-    | PATCH  | /api/v1/cards?name="FIREBALL!!!" | user | edit a card user owns        |
-    | DELETE | /api/v1/cards?name="FIREBALL!!!" | user | delete a card user owns      |
-    | DELETE | /api/v1/users/me                 | user | delete your user             |
-    | ...    | ...                              | ...  | ...                          |
-    |________|__________________________________|______|______________________________|
+
+| Verb   | Path                             | Auth | Purpose                    |
+| ------ | -------------------------------- | ---- | -------------------------- |
+| GET    | /api/v1/users?page=0&size=20     | user | list all users (paginated) |
+| GET    | /api/v1/cards?page=0&size=20     | user | list my cards (paginated)  |
+| GET    | /api/v1/allCards?page=0&size=20  | user | list all cards (paginated) |
+| POST   | /api/v1/randomCard               | user | get a random card          |
+| POST   | /api/v1/users                    | user | create a user              |
+| PATCH  | /api/v1/users                    | user | edit my user               |
+| GET    | /api/v1/users?displayname="drc"  | user | get a user                 |
+| POST   | /api/v1/cards                    | user | create a card              |
+| PATCH  | /api/v1/cards?name="FIREBALL!!!" | user | edit a card user owns      |
+| DELETE | /api/v1/cards?name="FIREBALL!!!" | user | delete a card user owns    |
+| DELETE | /api/v1/users/me                 | user | delete your user           |
+| ...    | ...                              | ...  | ...                        |
+    
 Mark each endpoint `public`, `user`, or `admin`. Mark which collection paginates and which
 filters or sorts.
 

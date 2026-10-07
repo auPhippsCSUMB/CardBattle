@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">CardBattle</string>
+    <string name="server_client_id" translatable="false">749490239612-2hlnub6ch7gh3bgos1p8v212cg4mgicv.apps.googleusercontent.com</string>
 </resources>
