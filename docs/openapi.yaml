@@ -1,4 +1,5 @@
-#OpenAPI contract for CST 438 Project 02.
+# Starter OpenAPI contract for CST 438 Project 02.
+# Copy to docs/openapi.yaml in your repo.
 # Render it:   https://editor.swagger.io
 # Lint it:     npx @redocly/cli lint docs/openapi.yaml
 # Mock it:     npx @stoplight/prism-cli mock docs/openapi.yaml -> http://127.0.0.1:4010
@@ -317,3 +318,291 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT from the OAuth2 Authorization Code + PKCE flow.
+
+  parameters:
+    CardId:
+      name: cardId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        example: 42
+    Page:
+      name: page
+      in: query
+      description: Zero-based page number
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      description: Items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  schemas:
+    CardClassName:
+      type: string
+      enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE]
+      example: WARRIOR
+
+    CardClass:
+      type: object
+      required: [id, name, strongAgainst, weakAgainst, neutralAgainst]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          $ref: '#/components/schemas/CardClassName'
+        description:
+          type: string
+          example: Armored frontliner; counters ranged attacks but struggles against heavy brawlers.
+        strongAgainst:
+          type: array
+          items:
+            $ref: '#/components/schemas/CardClassName'
+          example: [RANGER]
+        weakAgainst:
+          type: array
+          items:
+            $ref: '#/components/schemas/CardClassName'
+          example: [BRAWLER]
+        neutralAgainst:
+          type: array
+          items:
+            $ref: '#/components/schemas/CardClassName'
+          example: [MAGE, ROGUE]
+
+    Card:
+      type: object
+      required: [id, name, cardClass, powerLevel, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          readOnly: true
+          example: 42
+        name:
+          type: string
+          example: Ironclad Vanguard
+        description:
+          type: string
+          maxLength: 500
+          nullable: true
+          example: Defensive powerhouse equipped with tower shield
+        cardClass:
+          $ref: '#/components/schemas/CardClassName'
+        powerLevel:
+          type: integer
+          minimum: 1
+          example: 85
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+          example: '2026-10-01T12:00:00Z'
+
+    CardCreate:
+      description: Body for POST and PUT. PUT replaces all fields.
+      type: object
+      required: [name, cardClass, powerLevel]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Ironclad Vanguard
+        description:
+          type: string
+          maxLength: 500
+          nullable: true
+          example: Defensive powerhouse equipped with tower shield
+        cardClass:
+          $ref: '#/components/schemas/CardClassName'
+        powerLevel:
+          type: integer
+          minimum: 1
+          maximum: 9999
+          example: 85
+
+    CardPatch:
+      description: Body for PATCH. Send only the fields to update.
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Ironclad Dreadnought
+        description:
+          type: string
+          maxLength: 500
+          nullable: true
+          example: Upgraded shield and plate armor
+        cardClass:
+          $ref: '#/components/schemas/CardClassName'
+        powerLevel:
+          type: integer
+          minimum: 1
+          maximum: 9999
+          nullable: true
+          example: 95
+
+    PageMeta:
+      description: Spring Data PagedModel shape.
+      type: object
+      required: [size, number, totalElements, totalPages]
+      properties:
+        size:
+          type: integer
+          example: 20
+        number:
+          type: integer
+          example: 0
+        totalElements:
+          type: integer
+          format: int64
+          example: 57
+        totalPages:
+          type: integer
+          example: 3
+
+    CardPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    User:
+      type: object
+      required: [id, email, displayName, role]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 7
+        email:
+          type: string
+          format: email
+          example: player1@csumb.edu
+        displayName:
+          type: string
+          example: CardDuelist42
+        role:
+          $ref: '#/components/schemas/Role'
+
+    Role:
+      type: string
+      enum: [USER, ADMIN]
+
+    UserPatch:
+      description: Body for PATCH /api/v1/users/{userId}.
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+
+    UserPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+
+    Problem:
+      description: RFC 9457 Problem Details.
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          default: about:blank
+        title:
+          type: string
+          example: Not Found
+        status:
+          type: integer
+          example: 404
+        detail:
+          type: string
+          example: Card 42 not found
+        instance:
+          type: string
+          example: /api/v1/cards/42
+
+  responses:
+    BadRequest:
+      description: Validation failed or malformed JSON
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            title: Bad Request
+            status: 400
+            detail: One or more fields failed validation.
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            title: Unauthorized
+            status: 401
+    Forbidden:
+      description: Valid token, but not allowed (e.g. not an admin)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            title: Forbidden
+            status: 403
+    NotFound:
+      description: Doesn't exist, or belongs to someone else
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            title: Not Found
+            status: 404
+            detail: Card 42 not found
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            title: Internal Server Error
+            status: 500
