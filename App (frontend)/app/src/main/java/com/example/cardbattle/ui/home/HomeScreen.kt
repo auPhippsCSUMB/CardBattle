@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.cardbattle.ui.theme.CardBattleTheme
+import kotlin.math.roundToInt
 
 @Preview(showBackground = true)
 @Composable
@@ -32,6 +33,13 @@ private fun HomeScreenPreview() {
     CardBattleTheme {
         HomeScreen()
     }
+}
+
+internal fun calculateWinRate(wins: Int, losses: Int): String {
+    val totalGames = wins + losses
+    if (totalGames == 0) return "0%"
+    val winRate = (wins.toDouble() / totalGames.toDouble()) * 100
+    return "${winRate.roundToInt()}%"
 }
 
 @Composable
@@ -118,7 +126,7 @@ fun HomeScreen(
                     )
                     StatCard(
                         label = "Win Rate",
-                        value = "72%",
+                        value = calculateWinRate(18, 7),
                         accent = MaterialTheme.colorScheme.tertiary,
                     )
                 }
