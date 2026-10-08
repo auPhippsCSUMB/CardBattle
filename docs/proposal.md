@@ -136,6 +136,8 @@ Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone. (FEEL
 - What Fernando owns:
     - HomeScreen.kt and error model
 - What Gideon owns:
-    - 
+    - Spring Boot + Android Studio Starter code and openapi.yaml
+
+
 - [Project Board](https://github.com/users/auPhippsCSUMB/projects/1)
 - [Sprint 1](https://github.com/auPhippsCSUMB/CardBattle/milestone/22)
