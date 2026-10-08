@@ -132,7 +132,7 @@ Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone. (FEEL
 - What Austin owns:
     - API endroutes and openapi.yaml
 - What Michael owns:
-    - 
+    - ER Diagram and database
 - What Fernando owns:
     - HomeScreen.kt and error model
 - What Gideon owns:
