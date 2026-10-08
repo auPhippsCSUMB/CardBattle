@@ -1,7 +1,8 @@
+```
+mermaid
 erDiagram
     USER }o--o{ CARD : owns
-    CARD }o--|{ TYPE : is
-    TYPE ||--|| TYPE : matchup
+    CARD }o--o{ ATTRIBUTE : has
     USER {
         string id
         string name
@@ -12,7 +13,8 @@ erDiagram
         string image_url
         string name
     }
-    TYPE {
+    ATTRIBUTE {
         string id
         string name
     }
+```

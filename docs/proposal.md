@@ -18,18 +18,24 @@ API if they plan on using our app to create, trade, and battle cards as their ow
 Tables, primary and foreign keys, and cardinality. Edit this Mermaid diagram (it renders on GitHub;
 try changes at https://mermaid.live):
 
-```mermaid
+```
+mermaid
 erDiagram
-    USER ||--o{ THING : owns
+    USER }o--o{ CARD : owns
+    CARD }o--o{ ATTRIBUTE : has
     USER {
-        bigint id PK
-        string email UK
-    }
-    THING {
-        bigint id PK
-        bigint user_id FK
+        string id
         string name
-        string notes "nullable"
+        string email
+    }
+    CARD {
+        string id
+        string image_url
+        string name
+    }
+    ATTRIBUTE {
+        string id
+        string name
     }
 ```
 
