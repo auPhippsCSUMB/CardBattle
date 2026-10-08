@@ -139,4 +139,3 @@ Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone. (FEEL
     - 
 - [Project Board](https://github.com/users/auPhippsCSUMB/projects/1)
 - [Sprint 1](https://github.com/auPhippsCSUMB/CardBattle/milestone/22)
-
