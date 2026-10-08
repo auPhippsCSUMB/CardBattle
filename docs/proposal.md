@@ -8,11 +8,15 @@ cards, either from a specific parameter, all cards, or random card. A client app
 API if they plan on using our app to create, trade, and battle cards as their own user.
 
 ## 2. Resources
-| Resource   | Key fields                            | Relationships                        | 
-|------------|---------------------------------------|--------------------------------------|
-| User       | id, email, displayName, role, isAdmin | Each user owns 0 to many cards       |
-| Card       | id, name, imgURL, description, likes  | Each card belongs to 0 to many users |
-| Attributes | id, name, value,                      | Each card has 0 to many attributes   |
+| Resource       | Key fields                                                           | Relationships                                      |
+| -------------- | -------------------------------------------------------------------- | -------------------------------------------------- |
+| User           | id, email, displayName, role, password, isAdmin                      | Each user owns 0 to many cards, decks, and wins    |
+| Card           | id, name, imgURL, description, type, author(fk)                      | Each card is authored by one user                  |
+| User_owns_card | id, userId(fk), cardId(fk), value                                    | Each card is owned by one to many users            |
+| Deck           | id, userId(fk), name                                                 | Each deck is created by one user                   |
+| Card_in_deck   | id, cardId(fk), deckId(fk), userId(fk), type(fk)                     | Each card belongs to one to many decks             |
+| Wins           | id, winningUser(fk), losingUser(fk), winningCard(fk), losingCard(fk) | Each user and card has one to many wins and losses |
+
 
 ## 3. ER sketch
 Tables, primary and foreign keys, and cardinality. Edit this Mermaid diagram (it renders on GitHub;
@@ -21,41 +25,36 @@ try changes at https://mermaid.live):
 ```
 mermaid
 erDiagram
-    USER }o--o{ CARD : owns
-    CARD }o--o{ ATTRIBUTE : has
+    USER ||--o{ THING : owns
     USER {
-        string id
-        string name
-        string email
+        bigint id PK
+        string email UK
     }
-    CARD {
-        string id
-        string image_url
+    THING {
+        bigint id PK
+        bigint user_id FK
         string name
-    }
-    ATTRIBUTE {
-        string id
-        string name
+        string notes "nullable"
     }
 ```
 
 ## 4. Endpoints
-    ___________________________________________________________________________________
-    | Verb   | Path                             | Auth | Purpose                      |
-    | ---    |                                  |      |                              |
-    | GET    | /api/v1/users?page=0&size=20     | user | list all users (paginated)   |
-    | GET    | /api/v1/cards?page=0&size=20     | user | list my cards (paginated)    |
-    | GET    | /api/v1/allCards?page=0&size=20  | user | list all cards (paginated)   |
-    | POST   | /api/v1/randomCard               | user | get a random card            |
-    | POST   | /api/v1/users                    | user | create a user                |
-    | PATCH  | /api/v1/users                    | user | edit my user                 |
-    | GET    | /api/v1/users?displayname="drc"  | user | get a user                   |
-    | POST   | /api/v1/cards                    | user | create a card                |
-    | PATCH  | /api/v1/cards?name="FIREBALL!!!" | user | edit a card user owns        |
-    | DELETE | /api/v1/cards?name="FIREBALL!!!" | user | delete a card user owns      |
-    | DELETE | /api/v1/users/me                 | user | delete your user             |
-    | ...    | ...                              | ...  | ...                          |
-    |________|__________________________________|______|______________________________|
+
+| Verb   | Path                             | Auth | Purpose                    |
+| ------ | -------------------------------- | ---- | -------------------------- |
+| GET    | /api/v1/users?page=0&size=20     | user | list all users (paginated) |
+| GET    | /api/v1/cards?page=0&size=20     | user | list my cards (paginated)  |
+| GET    | /api/v1/allCards?page=0&size=20  | user | list all cards (paginated) |
+| POST   | /api/v1/randomCard               | user | get a random card          |
+| POST   | /api/v1/users                    | user | create a user              |
+| PATCH  | /api/v1/users                    | user | edit my user               |
+| GET    | /api/v1/users?displayname="drc"  | user | get a user                 |
+| POST   | /api/v1/cards                    | user | create a card              |
+| PATCH  | /api/v1/cards?name="FIREBALL!!!" | user | edit a card user owns      |
+| DELETE | /api/v1/cards?name="FIREBALL!!!" | user | delete a card user owns    |
+| DELETE | /api/v1/users/me                 | user | delete your user           |
+| ...    | ...                              | ...  | ...                        |
+    
 Mark each endpoint `public`, `user`, or `admin`. Mark which collection paginates and which
 filters or sorts.
 
@@ -88,3 +87,4 @@ Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone. (FEEL
 - [Project Board](https://github.com/users/auPhippsCSUMB/projects/1)
 - [Sprint 1](https://github.com/auPhippsCSUMB/CardBattle/milestone/22)
 
+ 

@@ -31,6 +31,8 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.jetbrains.kotlin:kotlin-test-junit5'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testRuntimeOnly 'com.h2database:h2'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
 }
 
 kotlin {
@@ -46,8 +48,20 @@ allOpen {
 }
 
 test {
-	useJUnitPlatform()
+	useJUnitPlatform { excludeTags 'railway', 'google-live' }
 	finalizedBy jacocoTestReport
+}
+
+// Explicit live checks: never run against Railway during the normal test/build task.
+['railwayTest': 'railway', 'googleSignInTest': 'google-live'].each { taskName, tagName ->
+	tasks.register(taskName, Test) {
+		group = 'verification'
+		description = "Runs the opt-in ${tagName} integration checks. See README.md."
+		testClassesDirs = sourceSets.test.output.classesDirs
+		classpath = sourceSets.test.runtimeClasspath
+		useJUnitPlatform { includeTags tagName }
+		outputs.upToDateWhen { false }
+	}
 }
 
 jacocoTestReport {
