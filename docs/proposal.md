@@ -134,7 +134,7 @@ Who owns what in Sprint 1. Link your Project board and Sprint 1 milestone. (FEEL
 - What Michael owns:
     - 
 - What Fernando owns:
-    - 
+    - HomeScreen.kt and error model
 - What Gideon owns:
     - 
 - [Project Board](https://github.com/users/auPhippsCSUMB/projects/1)
