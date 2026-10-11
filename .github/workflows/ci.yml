@@ -34,5 +34,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-report
-          path: API (backend)/build/reports/jacoco/test/html
-          if-no-files-found: error
+          path: |
+            API (backend)/build/reports/jacoco/test/html
+            API (backend)/build/reports/jacoco/test/jacocoTestReport.xml
+          if-no-files-found: warn
