@@ -1,3 +1,5 @@
+![CI](https://github.com/auPhippsCSUMB/CardBattle/actions/workflows/ci.yml/badge.svg)
+
 ## IMPORTANT RUNNING STEPS
 
 ### As of Oct 6:
