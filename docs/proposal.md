@@ -93,20 +93,42 @@ erDiagram
 
 ## 4. Endpoints
 
-| Verb   | Path                             | Auth | Purpose                    |
-| ------ | -------------------------------- | ---- | -------------------------- |
-| GET    | /api/v1/users?page=0&size=20     | user | list all users (paginated) |
-| GET    | /api/v1/cards?page=0&size=20     | user | list my cards (paginated)  |
-| GET    | /api/v1/allCards?page=0&size=20  | user | list all cards (paginated) |
-| POST   | /api/v1/randomCard               | user | get a random card          |
-| POST   | /api/v1/users                    | user | create a user              |
-| PATCH  | /api/v1/users                    | user | edit my user               |
-| GET    | /api/v1/users?displayname="drc"  | user | get a user                 |
-| POST   | /api/v1/cards                    | user | create a card              |
-| PATCH  | /api/v1/cards?name="FIREBALL!!!" | user | edit a card user owns      |
-| DELETE | /api/v1/cards?name="FIREBALL!!!" | user | delete a card user owns    |
-| DELETE | /api/v1/users/me                 | user | delete your user           |
-| ...    | ...                              | ...  | ...                        |
+| Verb   | Path                                                               | Auth   | Purpose                                                                 |
+| ------ | ------------------------------------------------------------------ | ------ | ----------------------------------------------------------------------- |
+| POST   | /api/v1/users                                                      | public | create a user                                                            |
+| GET    | /api/v1/users/me                                                   | user   | get my profile                                                           |
+| PATCH  | /api/v1/users/me                                                   | user   | edit my profile                                                          |
+| DELETE | /api/v1/users/me                                                   | user   | delete my user                                                           |
+| GET    | /api/v1/users?page=0&size=20&displayName=gideon&sort=displayName,asc | admin  | list all users (paginated, filter by displayName, sort by displayName)   |
+| GET    | /api/v1/users/{userId}                                             | admin  | get one user                                                             |
+| PATCH  | /api/v1/users/{userId}                                             | admin  | update a user's role/admin state                                         |
+| DELETE | /api/v1/users/{userId}                                             | admin  | delete a user                                                            |
+| GET    | /api/v1/cards?page=0&size=20&type=mage&sort=name,asc               | user   | list my authored cards (paginated, filter by type, sort by name)         |
+| POST   | /api/v1/cards                                                      | user   | create a card                                                            |
+| GET    | /api/v1/cards/{cardId}                                             | user   | get one card I authored                                                  |
+| PATCH  | /api/v1/cards/{cardId}                                             | user   | edit a card I authored                                                   |
+| DELETE | /api/v1/cards/{cardId}                                             | user   | delete a card I authored                                                 |
+| GET    | /api/v1/allCards?page=0&size=20&type=mage&author=12&sort=name,asc  | public | list all public cards (paginated, filter by type/author, sort by name)   |
+| GET    | /api/v1/allCards/{cardId}                                          | public | get one public card                                                      |
+| GET    | /api/v1/randomCard?type=mage                                       | public | get a random card, optionally filtered by type                           |
+| GET    | /api/v1/inventory?page=0&size=20&userId=7&type=mage                | user   | list cards a user owns (paginated, filter by owner/type)                 |
+| POST   | /api/v1/inventory                                                  | user   | add an owned card entry to a user's collection                           |
+| PATCH  | /api/v1/inventory/{ownershipId}                                    | user   | update owned card quantity/value                                         |
+| DELETE | /api/v1/inventory/{ownershipId}                                    | user   | remove an owned card entry                                               |
+| GET    | /api/v1/decks?page=0&size=20&userId=7&sort=name,asc                | user   | list decks (paginated, filter by owner, sort by name)                    |
+| POST   | /api/v1/decks                                                      | user   | create a deck                                                            |
+| GET    | /api/v1/decks/{deckId}                                             | user   | get one deck                                                             |
+| PATCH  | /api/v1/decks/{deckId}                                             | user   | rename or edit a deck                                                    |
+| DELETE | /api/v1/decks/{deckId}                                             | user   | delete a deck                                                            |
+| GET    | /api/v1/decks/{deckId}/cards                                       | user   | list cards in a deck                                                     |
+| POST   | /api/v1/decks/{deckId}/cards                                       | user   | add a card to a deck                                                     |
+| PATCH  | /api/v1/decks/{deckId}/cards/{cardInDeckId}                        | user   | edit deck-card metadata such as slot/type                                |
+| DELETE | /api/v1/decks/{deckId}/cards/{cardInDeckId}                        | user   | remove a card from a deck                                                |
+| GET    | /api/v1/battles?page=0&size=20&userId=7                            | user   | list battle results/history (paginated, filter by player)                |
+| POST   | /api/v1/battles                                                    | user   | record a battle result                                                   |
+| GET    | /api/v1/battles/{battleId}                                         | user   | get one battle result                                                    |
+| GET    | /api/v1/users/{userId}/stats                                       | public | get win/loss stats for a user                                            |
+| GET    | /api/v1/cards/{cardId}/stats                                       | public | get win/loss stats for a card                                            |
     
 Mark each endpoint `public`, `user`, or `admin`. Mark which collection paginates and which
 filters or sorts.
