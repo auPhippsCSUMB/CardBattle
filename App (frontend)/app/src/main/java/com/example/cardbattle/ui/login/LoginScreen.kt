@@ -20,11 +20,13 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.cardbattle.R
+import com.example.cardbattle.data.remote.verifyWithBackend
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.security.SecureRandom
+import android.util.Log
 
 @Composable
 fun LoginScreen(
@@ -60,15 +62,17 @@ fun LoginScreen(
                         }
                         if (idToken.isBlank()) {
                             message = "No Google ID token received. Please try again."
-                        } else {
+                        } else if (verifyWithBackend(idToken)) {
                             onTokenReceived(idToken)
-                            message = "Google ID token received. Backend verification is still required."
+                        } else {
+                            message = "Backend rejected sign-in. Please try again."
                         }
                     } catch (exception: GetCredentialCancellationException) {
                         message = "Sign-in cancelled."
                     } catch (exception: CancellationException) {
                         throw exception
                     } catch (exception: Exception) {
+                        Log.e("CardBattleLogin", "Sign-in failed", exception)
                         message = "Google sign-in failed. Please try again."
                     } finally {
                         loading = false

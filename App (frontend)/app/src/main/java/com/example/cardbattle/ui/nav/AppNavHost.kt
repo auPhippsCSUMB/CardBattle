@@ -8,6 +8,8 @@ import androidx.navigation.compose.rememberNavController
 import com.example.cardbattle.ui.home.HomeScreen
 import com.example.cardbattle.ui.login.LoginScreen
 import kotlinx.serialization.Serializable
+import androidx.compose.runtime.remember
+import com.example.cardbattle.data.auth.AuthSession
 
 @Serializable
 data object LoginRoute
@@ -20,6 +22,7 @@ fun AppNavHost(
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
+    val authSession = remember { AuthSession() }
     NavHost(
         navController = navController,
         startDestination = LoginRoute,
@@ -27,7 +30,8 @@ fun AppNavHost(
     ) {
         composable<LoginRoute> {
             LoginScreen(
-                onTokenReceived = {
+                onTokenReceived = { idToken ->
+                    authSession.save(idToken)
                     navController.navigate(HomeRoute) {
                         popUpTo<LoginRoute> { inclusive = true }
                     }
@@ -38,6 +42,7 @@ fun AppNavHost(
         composable<HomeRoute> {
             HomeScreen(
                 onLogout = {
+                    authSession.clear()
                     navController.navigate(LoginRoute) {
                         popUpTo<HomeRoute> { inclusive = true }
                     }
