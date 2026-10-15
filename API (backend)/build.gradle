@@ -16,8 +16,18 @@ java {
 	}
 }
 
+tasks.register('verify') {
+	group = 'verification'
+	description = 'Runs the full verification lifecycle, matching Maven verify for CI.'
+	dependsOn 'check'
+}
+
 repositories {
 	mavenCentral()
+}
+
+jacoco {
+	toolVersion = '0.8.12'
 }
 
 dependencies {
@@ -66,6 +76,11 @@ test {
 
 jacocoTestReport {
 	dependsOn test
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+	}
 }
 
 
