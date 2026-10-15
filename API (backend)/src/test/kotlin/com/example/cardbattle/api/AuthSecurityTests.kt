@@ -22,6 +22,12 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.net.InetSocketAddress
 import java.time.Instant
 import java.util.Date
+import com.example.cardbattle.api.user.UserEntity
+import com.example.cardbattle.api.user.UserRepository
+import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import kotlin.test.assertEquals
+
 
 /** Exercises the real filter chain and Boot-configured JWT decoder with local signing keys. */
 @SpringBootTest(properties = [
@@ -36,6 +42,8 @@ import java.util.Date
 class AuthSecurityTests {
     @Autowired
     lateinit var mvc: MockMvc
+    @Autowired
+    lateinit var users: UserRepository
 
     @Test
     fun `valid signed token returns its verified user claims`() {
@@ -74,6 +82,32 @@ class AuthSecurityTests {
         mvc.perform(get("/actuator/health"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("UP"))
+    }
+
+    @Test
+    fun `signed in user can change their display name`() {
+        users.deleteAll()
+        users.save(
+            UserEntity(
+                googleSubject = "test-google-subject",
+                email = "player@example.com",
+                displayName = "Old Name"
+            )
+        )
+
+        mvc.perform(
+            put("/api/v1/users/me/display-name")
+                .header("Authorization", "Bearer ${token()}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"  Captain  "}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.displayName").value("Captain"))
+
+        assertEquals(
+            "Captain",
+            users.findByGoogleSubject("test-google-subject")?.displayName
+        )
     }
 
     private fun rejected(value: String) {
