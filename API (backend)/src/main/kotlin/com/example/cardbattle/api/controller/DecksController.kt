@@ -46,7 +46,7 @@ class DecksController {
 
     @DeleteMapping("/{deckId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteDeck(@PathVariable deckId: Long) = TODO("Implement DELETE /api/v1/decks/{deckId}")
+    fun deleteDeck(@PathVariable deckId: Long): Unit = TODO("Implement DELETE /api/v1/decks/{deckId}")
 
     @GetMapping("/{deckId}/cards")
     fun listDeckCards(@PathVariable deckId: Long): List<DeckCardResponse> = TODO("Implement GET /api/v1/decks/{deckId}/cards")
@@ -70,5 +70,5 @@ class DecksController {
     fun removeCardFromDeck(
         @PathVariable deckId: Long,
         @PathVariable cardInDeckId: Long
-    ) = TODO("Implement DELETE /api/v1/decks/{deckId}/cards/{cardInDeckId}")
+    ): Unit = TODO("Implement DELETE /api/v1/decks/{deckId}/cards/{cardInDeckId}")
 }

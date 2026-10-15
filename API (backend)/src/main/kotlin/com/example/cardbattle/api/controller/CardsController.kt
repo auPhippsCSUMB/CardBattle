@@ -44,7 +44,7 @@ class CardsController {
 
     @DeleteMapping("/api/v1/cards/{cardId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteCard(@PathVariable cardId: Long) = TODO("Implement DELETE /api/v1/cards/{cardId}")
+    fun deleteCard(@PathVariable cardId: Long): Unit = TODO("Implement DELETE /api/v1/cards/{cardId}")
 
     @GetMapping("/api/v1/allCards")
     fun listAllCards(

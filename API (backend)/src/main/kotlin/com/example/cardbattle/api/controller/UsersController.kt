@@ -34,7 +34,7 @@ class UsersController {
 
     @DeleteMapping("/me")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteMyProfile() = TODO("Implement DELETE /api/v1/users/me")
+    fun deleteMyProfile(): Unit = TODO("Implement DELETE /api/v1/users/me")
 
     @GetMapping
     fun listUsers(
@@ -55,7 +55,7 @@ class UsersController {
 
     @DeleteMapping("/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteUser(@PathVariable userId: Long) = TODO("Implement DELETE /api/v1/users/{userId}")
+    fun deleteUser(@PathVariable userId: Long): Unit = TODO("Implement DELETE /api/v1/users/{userId}")
 
     @GetMapping("/{userId}/stats")
     fun getUserStats(@PathVariable userId: Long): StatsResponse = TODO("Implement GET /api/v1/users/{userId}/stats")

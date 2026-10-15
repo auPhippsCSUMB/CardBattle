@@ -41,5 +41,5 @@ class InventoryController {
 
     @DeleteMapping("/{ownershipId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteOwnership(@PathVariable ownershipId: Long) = TODO("Implement DELETE /api/v1/inventory/{ownershipId}")
+    fun deleteOwnership(@PathVariable ownershipId: Long): Unit = TODO("Implement DELETE /api/v1/inventory/{ownershipId}")
 }
