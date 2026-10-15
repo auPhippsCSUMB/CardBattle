@@ -32,6 +32,7 @@ import android.util.Log
 @Composable
 fun LoginScreen(
     requestIdToken: (suspend () -> String)? = null,
+    authenticateWithBackend: suspend (String) -> UserProfile = { signInAndGetUser(it) },
     onSignedIn: (String, UserProfile) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
@@ -64,7 +65,7 @@ fun LoginScreen(
                         if (idToken.isBlank()) {
                             message = "No Google ID token received. Please try again."
                         } else {
-                            val user = signInAndGetUser(idToken)
+                            val user = authenticateWithBackend(idToken)
                             onSignedIn(idToken, user)
                         }
                     } catch (exception: GetCredentialCancellationException) {

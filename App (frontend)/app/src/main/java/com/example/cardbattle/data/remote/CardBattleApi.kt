@@ -10,6 +10,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 
+private const val DEFAULT_BACKEND_URL = "http://10.0.2.2:8080"
+
 suspend fun verifyWithBackend(idToken: String): Boolean =
     withContext(Dispatchers.IO) {
         val connection = URL("http://10.0.2.2:8080/api/v1/auth/google")
@@ -38,9 +40,12 @@ data class UserProfile(
     val isAdmin: Boolean
 )
 
-suspend fun signInAndGetUser(idToken: String): UserProfile =
+suspend fun signInAndGetUser(
+    idToken: String,
+    backendUrl: String = DEFAULT_BACKEND_URL,
+): UserProfile =
     withContext(Dispatchers.IO) {
-        val connection = URL("http://10.0.2.2:8080/api/v1/auth/google")
+        val connection = URL("$backendUrl/api/v1/auth/google")
             .openConnection() as HttpURLConnection
 
         try {
@@ -66,9 +71,13 @@ private data class UpdateDisplayNameRequest(val displayName: String)
 class BackendHttpException(val statusCode: Int) :
     IOException("Backend returned HTTP $statusCode")
 
-suspend fun updateDisplayName(idToken: String, newName: String): UserProfile =
+suspend fun updateDisplayName(
+    idToken: String,
+    newName: String,
+    backendUrl: String = DEFAULT_BACKEND_URL,
+): UserProfile =
     withContext(Dispatchers.IO) {
-        val connection = URL("http://10.0.2.2:8080/api/v1/users/me/display-name")
+        val connection = URL("$backendUrl/api/v1/users/me/display-name")
             .openConnection() as HttpURLConnection
 
         try {
