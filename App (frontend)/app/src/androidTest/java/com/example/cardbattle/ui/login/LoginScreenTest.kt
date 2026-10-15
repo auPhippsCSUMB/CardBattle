@@ -11,6 +11,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialCustomException
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.cardbattle.data.remote.UserProfile
 import com.example.cardbattle.ui.theme.CardBattleTheme
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CompletableDeferred
@@ -18,19 +19,32 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
 
-/** Fake provider results keep routine UI tests independent of Google accounts/consent dialogs. */
+/** Fake provider and backend results keep UI tests independent of Google and Railway. */
 @RunWith(AndroidJUnit4::class)
 class LoginScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
     private val deliveredTokens = mutableListOf<String>()
+    private val deliveredUsers = mutableListOf<UserProfile>()
+    private val user = UserProfile(7, "player@example.com", "Test Player", false)
 
-    private fun show(provider: suspend () -> String) {
+    private fun show(
+        backend: suspend (String) -> UserProfile = { user },
+        provider: suspend () -> String,
+    ) {
         compose.setContent {
             CardBattleTheme {
-                LoginScreen(requestIdToken = provider, onTokenReceived = { deliveredTokens.add(it) })
+                LoginScreen(
+                    requestIdToken = provider,
+                    authenticateWithBackend = backend,
+                    onSignedIn = { token, profile ->
+                        deliveredTokens.add(token)
+                        deliveredUsers.add(profile)
+                    },
+                )
             }
         }
     }
@@ -48,9 +62,10 @@ class LoginScreenTest {
             .setId("player@example.com").setIdToken(token).build()
         show { googleIdToken(credential) }
         compose.onNodeWithText("Sign in with Google").performClick()
-        compose.onNodeWithText("Google ID token received. Backend verification is still required.").assertIsDisplayed()
+        compose.waitUntil(5_000) { deliveredTokens.size == 1 }
         compose.onNodeWithText(token).assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf(token), deliveredTokens) }
+        compose.runOnIdle { assertEquals(listOf(user), deliveredUsers) }
     }
 
     @Test
@@ -73,6 +88,7 @@ class LoginScreenTest {
         compose.onNodeWithText("Sign-in cancelled.").assertIsDisplayed()
         compose.runOnIdle { assertTrue(deliveredTokens.isEmpty()) }
         compose.onNodeWithText("Sign in with Google").performClick()
+        compose.waitUntil(5_000) { deliveredTokens.size == 1 }
         compose.runOnIdle { assertEquals(listOf("retry-token"), deliveredTokens) }
     }
 
@@ -110,7 +126,38 @@ class LoginScreenTest {
             assertTrue(deliveredTokens.isEmpty())
             pending.complete("completed-token")
         }
-        compose.onNodeWithText("Google ID token received. Backend verification is still required.").assertIsDisplayed()
+        compose.waitUntil(5_000) { deliveredTokens.size == 1 }
         compose.runOnIdle { assertEquals(listOf("completed-token"), deliveredTokens) }
+    }
+
+    @Test
+    fun backendRejectionDoesNotDeliverTokenOrUser() {
+        show(provider = { "test-token" }, backend = { throw IOException("HTTP 401") })
+
+        compose.onNodeWithText("Sign in with Google").performClick()
+        compose.onNodeWithText("Google sign-in failed. Please try again.").assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(deliveredTokens.isEmpty())
+            assertTrue(deliveredUsers.isEmpty())
+        }
+    }
+
+    @Test
+    fun pendingBackendVerificationDoesNotAuthenticateEarly() {
+        val pending = CompletableDeferred<UserProfile>()
+        show(provider = { "test-token" }, backend = { pending.await() })
+
+        compose.onNodeWithText("Sign in with Google").performClick()
+        compose.onNodeWithText("Signing in…").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertTrue(deliveredTokens.isEmpty())
+            pending.complete(user)
+        }
+
+        compose.waitUntil(5_000) { deliveredTokens.size == 1 }
+        compose.runOnIdle {
+            assertEquals(listOf("test-token"), deliveredTokens)
+            assertEquals(listOf(user), deliveredUsers)
+        }
     }
 }

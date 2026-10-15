@@ -26,6 +26,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.cardbattle.ui.theme.CardBattleTheme
 import kotlin.math.roundToInt
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @Preview(showBackground = true)
 @Composable
@@ -44,8 +53,16 @@ internal fun calculateWinRate(wins: Int, losses: Int): String {
 
 @Composable
 fun HomeScreen(
+    displayName: String = "Player",
+    onSaveDisplayName: suspend (String) -> Unit = {},
     onLogout: () -> Unit = {},
 ) {
+    val scope = rememberCoroutineScope()
+    var editing by remember { mutableStateOf(false) }
+    var draftName by remember { mutableStateOf(displayName) }
+    var saving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -61,41 +78,103 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.End,
             ) {
                 Card(
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text(
-                                text = "F",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = displayName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = "Level 12",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
 
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "Fernando",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
+                        if (!editing) {
+                            TextButton(onClick = {
+                                draftName = displayName
+                                errorMessage = null
+                                editing = true
+                            }) {
+                                Text("Edit name")
+                            }
+                        } else {
+                            OutlinedTextField(
+                                value = draftName,
+                                onValueChange = { draftName = it },
+                                label = { Text("Display name") },
+                                singleLine = true,
+                                enabled = !saving,
+                                modifier = Modifier.fillMaxWidth(),
                             )
-                            Text(
-                                text = "Level 12",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        editing = false
+                                        errorMessage = null
+                                    },
+                                    enabled = !saving,
+                                ) {
+                                    Text("Cancel")
+                                }
+
+                                Button(
+                                    enabled = !saving && draftName.isNotBlank(),
+                                    onClick = {
+                                        saving = true
+                                        errorMessage = null
+                                        scope.launch {
+                                            try {
+                                                onSaveDisplayName(draftName.trim())
+                                                editing = false
+                                            } catch (error: CancellationException) {
+                                                throw error
+                                            } catch (error: Exception) {
+                                                errorMessage = "Could not save name. Please try again."
+                                            } finally {
+                                                saving = false
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Text(if (saving) "Saving…" else "Save")
+                                }
+                            }
+
+                            errorMessage?.let {
+                                Text(it, color = MaterialTheme.colorScheme.error)
+                            }
                         }
                     }
                 }

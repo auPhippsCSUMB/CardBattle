@@ -12,6 +12,7 @@
 - You can always contact me (Austin) if you have trouble with this, or use codex...
  
 1. Get .env from group chat
+~~
 2. run
 ```bash
 npm install -g @railway/cli 
@@ -50,6 +51,7 @@ Database: railway
 ```
 replace the number after the **localhost:** with the port number
 Leave this terminal open, it is your postgres server, open a new terminal
+~~
 
 8. run
 ```bash
@@ -61,4 +63,10 @@ bash ./gradlew bootRun
 9. Leave this terminal open, it is your spring boot app
 10. Your android studio project should be linked to the backend now! Database and oauth should be functional
 
+### NOTE
+I am too lazy to remove steps 2-7, but they aren't necessary with the new .env with the public railway.
+you may have to put <YOUR_ROUTE_TO_THE_PROJECT>/Android/Sdk/platform-tools/adb shell pm grant com.example.cardbattle android.permission.ACCESS_LOCAL_NETWORK
+into the terminal to get login to work as Android 17 has some weird local network blocking
+
 This may very well be deprecated and replaced tomorrow if the public railway works instead, but for now, this is how we run our app
+^^^ TRUE!!!
