@@ -27,47 +27,24 @@ class CardsController {
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) type: CardType?,
         @RequestParam(required = false, defaultValue = "createdAt,desc") sort: String
-    ): PageResponse<CardResponse> {
-        val card = StubDataFactory.sampleCard().copy(
-            type = type ?: StubDataFactory.sampleCard().type,
-            name = if (sort.startsWith("name")) "Arcane Sentinel" else StubDataFactory.sampleCard().name
-        )
-        return StubDataFactory.page(listOf(card), page, size)
-    }
+    ): PageResponse<CardResponse> = TODO("Implement GET /api/v1/cards")
 
     @PostMapping("/api/v1/cards")
     @ResponseStatus(HttpStatus.CREATED)
-    fun createCard(@RequestBody request: CardCreateRequest): CardResponse = CardResponse(
-        id = 42L,
-        name = request.name,
-        imgURL = request.imgURL,
-        description = request.description,
-        type = request.type,
-        authorId = 7L,
-        createdAt = "2026-10-01T12:00:00Z"
-    )
+    fun createCard(@RequestBody request: CardCreateRequest): CardResponse = TODO("Implement POST /api/v1/cards")
 
     @GetMapping("/api/v1/cards/{cardId}")
-    fun getMyCard(@PathVariable cardId: Long): CardResponse = StubDataFactory.sampleCard(cardId)
+    fun getMyCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/cards/{cardId}")
 
     @PatchMapping("/api/v1/cards/{cardId}")
     fun updateCard(
         @PathVariable cardId: Long,
         @RequestBody request: CardPatchRequest
-    ): CardResponse {
-        val sample = StubDataFactory.sampleCard(cardId)
-        return sample.copy(
-            name = request.name ?: sample.name,
-            imgURL = request.imgURL ?: sample.imgURL,
-            description = request.description ?: sample.description,
-            type = request.type ?: sample.type
-        )
-    }
+    ): CardResponse = TODO("Implement PATCH /api/v1/cards/{cardId}")
 
     @DeleteMapping("/api/v1/cards/{cardId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteCard(@PathVariable cardId: Long) {
-    }
+    fun deleteCard(@PathVariable cardId: Long) = TODO("Implement DELETE /api/v1/cards/{cardId}")
 
     @GetMapping("/api/v1/allCards")
     fun listAllCards(
@@ -76,21 +53,14 @@ class CardsController {
         @RequestParam(required = false) type: CardType?,
         @RequestParam(required = false) author: Long?,
         @RequestParam(required = false, defaultValue = "name,asc") sort: String
-    ): PageResponse<CardResponse> {
-        val card = StubDataFactory.sampleCard(authorId = author ?: 7L).copy(
-            type = type ?: StubDataFactory.sampleCard().type,
-            name = if (sort.startsWith("name")) "Battle Archivist" else StubDataFactory.sampleCard().name
-        )
-        return StubDataFactory.page(listOf(card), page, size)
-    }
+    ): PageResponse<CardResponse> = TODO("Implement GET /api/v1/allCards")
 
     @GetMapping("/api/v1/allCards/{cardId}")
-    fun getPublicCard(@PathVariable cardId: Long): CardResponse = StubDataFactory.sampleCard(cardId)
+    fun getPublicCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/allCards/{cardId}")
 
     @GetMapping("/api/v1/randomCard")
-    fun getRandomCard(@RequestParam(required = false) type: CardType?): CardResponse =
-        StubDataFactory.sampleCard().copy(type = type ?: CardType.MAGE)
+    fun getRandomCard(@RequestParam(required = false) type: CardType?): CardResponse = TODO("Implement GET /api/v1/randomCard")
 
     @GetMapping("/api/v1/cards/{cardId}/stats")
-    fun getCardStats(@PathVariable cardId: Long): StatsResponse = StubDataFactory.sampleStats()
+    fun getCardStats(@PathVariable cardId: Long): StatsResponse = TODO("Implement GET /api/v1/cards/{cardId}/stats")
 }

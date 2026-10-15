@@ -24,27 +24,17 @@ class UsersController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun createUser(@RequestBody request: UserCreateRequest): UserResponse = UserResponse(
-        id = 7L,
-        email = request.email,
-        displayName = request.displayName,
-        role = StubDataFactory.sampleUser().role,
-        isAdmin = false
-    )
+    fun createUser(@RequestBody request: UserCreateRequest): UserResponse = TODO("Implement POST /api/v1/users")
 
     @GetMapping("/me")
-    fun getMyProfile(): UserResponse = StubDataFactory.sampleUser()
+    fun getMyProfile(): UserResponse = TODO("Implement GET /api/v1/users/me")
 
     @PatchMapping("/me")
-    fun updateMyProfile(@RequestBody request: UserProfilePatchRequest): UserResponse {
-        val sample = StubDataFactory.sampleUser()
-        return sample.copy(displayName = request.displayName ?: sample.displayName)
-    }
+    fun updateMyProfile(@RequestBody request: UserProfilePatchRequest): UserResponse = TODO("Implement PATCH /api/v1/users/me")
 
     @DeleteMapping("/me")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteMyProfile() {
-    }
+    fun deleteMyProfile() = TODO("Implement DELETE /api/v1/users/me")
 
     @GetMapping
     fun listUsers(
@@ -52,33 +42,21 @@ class UsersController {
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) displayName: String?,
         @RequestParam(required = false, defaultValue = "displayName,asc") sort: String
-    ): PageResponse<UserResponse> {
-        val user = StubDataFactory.sampleUser().copy(
-            displayName = displayName ?: StubDataFactory.sampleUser().displayName
-        )
-        return StubDataFactory.page(listOf(user.copy(email = "${sort.substringBefore(',')}@example.com")), page, size)
-    }
+    ): PageResponse<UserResponse> = TODO("Implement GET /api/v1/users")
 
     @GetMapping("/{userId}")
-    fun getUser(@PathVariable userId: Long): UserResponse = StubDataFactory.sampleUser(userId)
+    fun getUser(@PathVariable userId: Long): UserResponse = TODO("Implement GET /api/v1/users/{userId}")
 
     @PatchMapping("/{userId}")
     fun updateUser(
         @PathVariable userId: Long,
         @RequestBody request: UserAdminPatchRequest
-    ): UserResponse {
-        val sample = StubDataFactory.sampleUser(userId)
-        return sample.copy(
-            role = request.role ?: sample.role,
-            isAdmin = request.isAdmin ?: sample.isAdmin
-        )
-    }
+    ): UserResponse = TODO("Implement PATCH /api/v1/users/{userId}")
 
     @DeleteMapping("/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteUser(@PathVariable userId: Long) {
-    }
+    fun deleteUser(@PathVariable userId: Long) = TODO("Implement DELETE /api/v1/users/{userId}")
 
     @GetMapping("/{userId}/stats")
-    fun getUserStats(@PathVariable userId: Long): StatsResponse = StubDataFactory.sampleStats()
+    fun getUserStats(@PathVariable userId: Long): StatsResponse = TODO("Implement GET /api/v1/users/{userId}/stats")
 }

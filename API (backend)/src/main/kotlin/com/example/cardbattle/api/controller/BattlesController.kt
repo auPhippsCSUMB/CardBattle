@@ -22,24 +22,12 @@ class BattlesController {
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) userId: Long?
-    ): PageResponse<BattleResponse> {
-        val battle = StubDataFactory.sampleBattle().copy(
-            winningUser = userId ?: StubDataFactory.sampleBattle().winningUser
-        )
-        return StubDataFactory.page(listOf(battle), page, size)
-    }
+    ): PageResponse<BattleResponse> = TODO("Implement GET /api/v1/battles")
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun createBattle(@RequestBody request: BattleCreateRequest): BattleResponse = BattleResponse(
-        id = 25L,
-        winningUser = request.winningUser,
-        losingUser = request.losingUser,
-        winningCard = request.winningCard,
-        losingCard = request.losingCard,
-        occurredAt = "2026-10-06T18:45:00Z"
-    )
+    fun createBattle(@RequestBody request: BattleCreateRequest): BattleResponse = TODO("Implement POST /api/v1/battles")
 
     @GetMapping("/{battleId}")
-    fun getBattle(@PathVariable battleId: Long): BattleResponse = StubDataFactory.sampleBattle(battleId)
+    fun getBattle(@PathVariable battleId: Long): BattleResponse = TODO("Implement GET /api/v1/battles/{battleId}")
 }

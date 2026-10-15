@@ -29,65 +29,46 @@ class DecksController {
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) userId: Long?,
         @RequestParam(required = false, defaultValue = "name,asc") sort: String
-    ): PageResponse<DeckResponse> {
-        val deck = StubDataFactory.sampleDeck(userId = userId ?: 7L).copy(
-            name = if (sort.startsWith("name")) "Starter Mage Deck" else StubDataFactory.sampleDeck().name
-        )
-        return StubDataFactory.page(listOf(deck), page, size)
-    }
+    ): PageResponse<DeckResponse> = TODO("Implement GET /api/v1/decks")
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun createDeck(@RequestBody request: DeckCreateRequest): DeckResponse =
-        StubDataFactory.sampleDeck().copy(name = request.name)
+    fun createDeck(@RequestBody request: DeckCreateRequest): DeckResponse = TODO("Implement POST /api/v1/decks")
 
     @GetMapping("/{deckId}")
-    fun getDeck(@PathVariable deckId: Long): DeckResponse = StubDataFactory.sampleDeck(deckId)
+    fun getDeck(@PathVariable deckId: Long): DeckResponse = TODO("Implement GET /api/v1/decks/{deckId}")
 
     @PatchMapping("/{deckId}")
     fun updateDeck(
         @PathVariable deckId: Long,
         @RequestBody request: DeckPatchRequest
-    ): DeckResponse {
-        val sample = StubDataFactory.sampleDeck(deckId)
-        return sample.copy(name = request.name ?: sample.name)
-    }
+    ): DeckResponse = TODO("Implement PATCH /api/v1/decks/{deckId}")
 
     @DeleteMapping("/{deckId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteDeck(@PathVariable deckId: Long) {
-    }
+    fun deleteDeck(@PathVariable deckId: Long) = TODO("Implement DELETE /api/v1/decks/{deckId}")
 
     @GetMapping("/{deckId}/cards")
-    fun listDeckCards(@PathVariable deckId: Long): List<DeckCardResponse> =
-        listOf(StubDataFactory.sampleDeckCard(deckId = deckId))
+    fun listDeckCards(@PathVariable deckId: Long): List<DeckCardResponse> = TODO("Implement GET /api/v1/decks/{deckId}/cards")
 
     @PostMapping("/{deckId}/cards")
     @ResponseStatus(HttpStatus.CREATED)
     fun addCardToDeck(
         @PathVariable deckId: Long,
         @RequestBody request: DeckCardCreateRequest
-    ): DeckCardResponse = StubDataFactory.sampleDeckCard(
-        deckId = deckId,
-        userId = request.userId,
-        cardId = request.cardId
-    ).copy(type = request.type)
+    ): DeckCardResponse = TODO("Implement POST /api/v1/decks/{deckId}/cards")
 
     @PatchMapping("/{deckId}/cards/{cardInDeckId}")
     fun updateDeckCard(
         @PathVariable deckId: Long,
         @PathVariable cardInDeckId: Long,
         @RequestBody request: DeckCardPatchRequest
-    ): DeckCardResponse {
-        val sample = StubDataFactory.sampleDeckCard(id = cardInDeckId, deckId = deckId)
-        return sample.copy(type = request.type ?: sample.type)
-    }
+    ): DeckCardResponse = TODO("Implement PATCH /api/v1/decks/{deckId}/cards/{cardInDeckId}")
 
     @DeleteMapping("/{deckId}/cards/{cardInDeckId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun removeCardFromDeck(
         @PathVariable deckId: Long,
         @PathVariable cardInDeckId: Long
-    ) {
-    }
+    ) = TODO("Implement DELETE /api/v1/decks/{deckId}/cards/{cardInDeckId}")
 }

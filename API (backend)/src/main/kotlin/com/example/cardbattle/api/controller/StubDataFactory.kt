@@ -13,72 +13,19 @@ import com.example.cardbattle.api.dataObjects.StatsResponse
 import com.example.cardbattle.api.dataObjects.UserResponse
 
 object StubDataFactory {
-    fun sampleUser(id: Long = 7L): UserResponse = UserResponse(
-        id = id,
-        email = "player$id@example.com",
-        displayName = "CardDuelist$id",
-        role = Role.USER,
-        isAdmin = false
-    )
+    fun sampleUser(id: Long = 7L): UserResponse = TODO("Replace with real user stub data for /api/v1/users")
 
-    fun sampleCard(id: Long = 42L, authorId: Long = 7L): CardResponse = CardResponse(
-        id = id,
-        name = "Ironclad Vanguard",
-        imgURL = "https://example.com/cards/$id.png",
-        description = "Defensive powerhouse equipped with tower shield",
-        type = CardType.MAGE,
-        authorId = authorId,
-        createdAt = "2026-10-01T12:00:00Z"
-    )
+    fun sampleCard(id: Long = 42L, authorId: Long = 7L): CardResponse = TODO("Replace with real card stub data for /api/v1/cards")
 
-    fun sampleOwnership(id: Long = 19L, userId: Long = 7L, cardId: Long = 42L): OwnershipResponse = OwnershipResponse(
-        id = id,
-        userId = userId,
-        cardId = cardId,
-        value = 2,
-        card = sampleCard(cardId, userId)
-    )
+    fun sampleOwnership(id: Long = 19L, userId: Long = 7L, cardId: Long = 42L): OwnershipResponse = TODO("Replace with real inventory stub data for /api/v1/inventory")
 
-    fun sampleDeck(id: Long = 3L, userId: Long = 7L): DeckResponse = DeckResponse(
-        id = id,
-        userId = userId,
-        name = "Starter Mage Deck",
-        createdAt = "2026-10-03T09:30:00Z"
-    )
+    fun sampleDeck(id: Long = 3L, userId: Long = 7L): DeckResponse = TODO("Replace with real deck stub data for /api/v1/decks")
 
-    fun sampleDeckCard(id: Long = 12L, deckId: Long = 3L, userId: Long = 7L, cardId: Long = 42L): DeckCardResponse =
-        DeckCardResponse(
-            id = id,
-            deckId = deckId,
-            cardId = cardId,
-            userId = userId,
-            type = CardType.MAGE,
-            card = sampleCard(cardId, userId)
-        )
+    fun sampleDeckCard(id: Long = 12L, deckId: Long = 3L, userId: Long = 7L, cardId: Long = 42L): DeckCardResponse = TODO("Replace with real deck-card stub data for /api/v1/decks/{deckId}/cards")
 
-    fun sampleBattle(id: Long = 25L): BattleResponse = BattleResponse(
-        id = id,
-        winningUser = 7L,
-        losingUser = 9L,
-        winningCard = 19L,
-        losingCard = 22L,
-        occurredAt = "2026-10-06T18:45:00Z"
-    )
+    fun sampleBattle(id: Long = 25L): BattleResponse = TODO("Replace with real battle stub data for /api/v1/battles")
 
-    fun sampleStats(): StatsResponse = StatsResponse(
-        wins = 18,
-        losses = 7,
-        totalBattles = 25,
-        winRate = 72.0
-    )
+    fun sampleStats(): StatsResponse = TODO("Replace with real stats stub data for user/card stats endpoints")
 
-    fun <T> page(content: List<T>, page: Int, size: Int): PageResponse<T> = PageResponse(
-        content = content,
-        page = PageMeta(
-            size = size,
-            number = page,
-            totalElements = content.size.toLong(),
-            totalPages = if (content.isEmpty()) 0 else 1
-        )
-    )
+    fun <T> page(content: List<T>, page: Int, size: Int): PageResponse<T> = TODO("Replace with real paginated response stub data")
 }

@@ -27,37 +27,19 @@ class InventoryController {
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) userId: Long?,
         @RequestParam(required = false) type: CardType?
-    ): PageResponse<OwnershipResponse> {
-        val ownerId = userId ?: 7L
-        val sample = StubDataFactory.sampleOwnership(userId = ownerId)
-        return StubDataFactory.page(
-            listOf(
-                if (type == null) sample else sample.copy(card = sample.card?.copy(type = type))
-            ),
-            page,
-            size
-        )
-    }
+    ): PageResponse<OwnershipResponse> = TODO("Implement GET /api/v1/inventory")
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun createOwnership(@RequestBody request: OwnershipCreateRequest): OwnershipResponse =
-        StubDataFactory.sampleOwnership(
-            userId = request.userId,
-            cardId = request.cardId
-        ).copy(value = request.value)
+    fun createOwnership(@RequestBody request: OwnershipCreateRequest): OwnershipResponse = TODO("Implement POST /api/v1/inventory")
 
     @PatchMapping("/{ownershipId}")
     fun updateOwnership(
         @PathVariable ownershipId: Long,
         @RequestBody request: OwnershipPatchRequest
-    ): OwnershipResponse {
-        val sample = StubDataFactory.sampleOwnership(ownershipId)
-        return sample.copy(value = request.value ?: sample.value)
-    }
+    ): OwnershipResponse = TODO("Implement PATCH /api/v1/inventory/{ownershipId}")
 
     @DeleteMapping("/{ownershipId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteOwnership(@PathVariable ownershipId: Long) {
-    }
+    fun deleteOwnership(@PathVariable ownershipId: Long) = TODO("Implement DELETE /api/v1/inventory/{ownershipId}")
 }
