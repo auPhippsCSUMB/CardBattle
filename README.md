@@ -2,6 +2,23 @@
 
 ## IMPORTANT RUNNING STEPS
 
+### Docker quick start
+- Copy `.env.example` to `.env` and fill in the values you want for your local environment.
+- The compose file reads runtime values from your shell or `.env` file instead of hardcoding them into the project.
+- Start the local database:
+  ```bash
+  docker compose up --build
+  ```
+- Start the API as an optional profile when needed:
+  ```bash
+  docker compose --profile api up --build
+  ```
+- PostgreSQL is available at `localhost:5432` and the API is available at `http://localhost:8080` when the API profile is enabled.
+- To stop everything:
+  ```bash
+  docker compose down
+  ```
+
 ### As of Oct 6:
 - A private SSH tunnel is being used to connect to Railway Postgres
   - This may be changed to a public port if necessary
