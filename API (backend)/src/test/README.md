@@ -16,6 +16,24 @@ They cover saving a card with the authenticated author, optional fields, invalid
 missing/invalid tokens, and a token whose user has not registered.
 No Railway connection or real Google token is needed.
 
+## Get and delete cards
+
+Run `bash ./gradlew test --tests '*CardRoutesTests'` for the random-card, get-my-card,
+and delete-card routes. The tests use a separate local H2 database and fake token
+verification, including a test-only foreign key to check deletion conflicts.
+
+- `GET /api/v1/randomCard` returns any author's card; optional `?type=MAGE` filters it.
+  No cards or no matching type returns 404; invalid type names return 400.
+- `GET /api/v1/cards/{cardId}` returns a card only to its author.
+- `DELETE /api/v1/cards/{cardId}` deletes a card only for its author and returns 204.
+  Referenced cards return 409 without deleting related records.
+- Missing cards and cards authored by someone else return 404 for the last two routes.
+  All three routes require a valid Google bearer token (otherwise 401).
+
+The random query uses `ORDER BY RANDOM() LIMIT 1`, suitable for the small project
+database. The read routes return data only; requesting a random card does not grant
+inventory ownership. No database migration is required.
+
 ## Live Railway connection
 
 Run Railway commands from `API (backend)`, where this project's Railway link is configured.

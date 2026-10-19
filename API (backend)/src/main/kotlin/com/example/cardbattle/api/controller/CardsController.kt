@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
@@ -47,7 +46,12 @@ class CardsController(
     }
 
     @GetMapping("/api/v1/cards/{cardId}")
-    fun getMyCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/cards/{cardId}")
+    fun getMyCard(
+        @PathVariable cardId: Int,
+        authentication: JwtAuthenticationToken,
+    ): CardResponse {
+        return cardService.getMyCard(cardId, authentication.token.subject)
+    }
 
     @PatchMapping("/api/v1/cards/{cardId}")
     fun updateCard(
@@ -57,7 +61,12 @@ class CardsController(
 
     @DeleteMapping("/api/v1/cards/{cardId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteCard(@PathVariable cardId: Long): Unit = TODO("Implement DELETE /api/v1/cards/{cardId}")
+    fun deleteCard(
+        @PathVariable cardId: Int,
+        authentication: JwtAuthenticationToken,
+    ) {
+        cardService.deleteCard(cardId, authentication.token.subject)
+    }
 
     @GetMapping("/api/v1/allCards")
     fun listAllCards(
@@ -72,7 +81,9 @@ class CardsController(
     fun getPublicCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/allCards/{cardId}")
 
     @GetMapping("/api/v1/randomCard")
-    fun getRandomCard(@RequestParam(required = false) type: CardType?): CardResponse = TODO("Implement GET /api/v1/randomCard")
+    fun getRandomCard(@RequestParam(required = false) type: CardType?): CardResponse {
+        return cardService.getRandomCard(type)
+    }
 
     @GetMapping("/api/v1/cards/{cardId}/stats")
     fun getCardStats(@PathVariable cardId: Long): StatsResponse = TODO("Implement GET /api/v1/cards/{cardId}/stats")
