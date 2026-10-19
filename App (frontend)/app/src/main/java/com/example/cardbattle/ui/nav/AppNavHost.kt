@@ -14,11 +14,15 @@ import com.example.cardbattle.data.remote.BackendHttpException
 import com.example.cardbattle.data.remote.UserProfile
 import com.example.cardbattle.ui.home.HomeScreen
 import com.example.cardbattle.ui.login.LoginScreen
+import com.example.cardbattle.ui.login.SignUpScreen
 import kotlinx.serialization.Serializable
 import com.example.cardbattle.data.remote.updateDisplayName
 
 @Serializable
 data object LoginRoute
+
+@Serializable
+data object SignUpRoute
 
 @Serializable
 data object HomeRoute
@@ -42,6 +46,9 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                     navController.navigate(HomeRoute) {
                         popUpTo<LoginRoute> { inclusive = true }
                     }
+                },
+                onNavigateToSignUp = {
+                    navController.navigate(SignUpRoute)
                 }
             )
         }
@@ -71,7 +78,19 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                     navController.navigate(LoginRoute) {
                         popUpTo<HomeRoute> { inclusive = true }
                     }
+                },
+                onBackToLogin = {
+                    navController.popBackStack()
                 }
+            )
+        }
+
+        composable<HomeRoute> {
+            HomeScreen(
+                onNavigateToBattle = { /* TODO: navController.navigate(BattleRoute) */ },
+                onNavigateToNewCards = { /* TODO: navController.navigate(NewCardsRoute) */ },
+                onNavigateToYourCards = { /* TODO: navController.navigate(YourCardsRoute) */ },
+                onNavigateToSettings = { /* TODO: navController.navigate(SettingsRoute) */ }
             )
         }
     }
