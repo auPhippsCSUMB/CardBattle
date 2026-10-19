@@ -30,7 +30,7 @@ jobs:
         run: ./gradlew verify --no-daemon
 
       - name: Build Docker image
-        run: docker build --file "API (backend)/Dockerfile" --tag cardbattle-api:ci .
+        run: docker build --file Dockerfile --tag cardbattle-api:ci .
 
       - name: Upload JaCoCo report
         if: always()
