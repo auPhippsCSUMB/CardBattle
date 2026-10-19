@@ -8,12 +8,11 @@ import com.example.cardbattle.api.dataObjects.DeckResponse
 import com.example.cardbattle.api.dataObjects.OwnershipResponse
 import com.example.cardbattle.api.dataObjects.PageMeta
 import com.example.cardbattle.api.dataObjects.PageResponse
-import com.example.cardbattle.api.dataObjects.Role
 import com.example.cardbattle.api.dataObjects.StatsResponse
 import com.example.cardbattle.api.dataObjects.UserResponse
 
 object StubDataFactory {
-    fun sampleUser(id: Long = 7L): UserResponse = TODO("Replace with real user stub data for /api/v1/users")
+    fun sampleUser(id: Int = 7): UserResponse = TODO("Replace with real user stub data for /api/v1/users")
 
     fun sampleCard(id: Long = 42L, authorId: Long = 7L): CardResponse = TODO("Replace with real card stub data for /api/v1/cards")
 

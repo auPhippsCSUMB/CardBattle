@@ -7,7 +7,6 @@ data class CardResponse(
     val description: String?,
     val type: CardType,
     val authorId: Long,
-    val createdAt: String
 )
 
 data class CardCreateRequest(

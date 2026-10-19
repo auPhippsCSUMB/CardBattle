@@ -17,21 +17,34 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import com.example.cardbattle.api.card.CardService
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
+
 
 @RestController
-class CardsController {
+class CardsController(
+    private val cardService: CardService,
+) {
 
     @GetMapping("/api/v1/cards")
     fun listMyCards(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) type: CardType?,
-        @RequestParam(required = false, defaultValue = "createdAt,desc") sort: String
+        @RequestParam(required = false, defaultValue = "name,asc") sort: String
     ): PageResponse<CardResponse> = TODO("Implement GET /api/v1/cards")
 
     @PostMapping("/api/v1/cards")
     @ResponseStatus(HttpStatus.CREATED)
-    fun createCard(@RequestBody request: CardCreateRequest): CardResponse = TODO("Implement POST /api/v1/cards")
+    fun createCard(
+        @RequestBody request: CardCreateRequest,
+        authentication: JwtAuthenticationToken,
+    ): CardResponse {
+        return cardService.createCard(
+            request = request,
+            googleSubject = authentication.token.subject,
+        )
+    }
 
     @GetMapping("/api/v1/cards/{cardId}")
     fun getMyCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/cards/{cardId}")

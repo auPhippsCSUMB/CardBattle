@@ -7,6 +7,15 @@ security filter and Boot-configured decoder. It checks successful claims, missin
 tokens, expiration, wrong audience, wrong issuer, wrong signature, and public health access.
 These prove our validation behavior; they do not prove Google Console setup or Railway availability.
 
+## Card creation
+
+Run `bash ./gradlew test --tests '*CreateCardTests'` to test `POST /api/v1/cards`.
+These tests use the real controller, service, and repository with a local H2 database
+and mocked token verification. Each test rolls back its database changes.
+They cover saving a card with the authenticated author, optional fields, invalid input,
+missing/invalid tokens, and a token whose user has not registered.
+No Railway connection or real Google token is needed.
+
 ## Live Railway connection
 
 Run Railway commands from `API (backend)`, where this project's Railway link is configured.

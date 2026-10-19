@@ -1,5 +1,6 @@
 package com.example.cardbattle.api.auth
 
+import com.example.cardbattle.api.dataObjects.UserResponse
 import com.example.cardbattle.api.user.UserEntity
 import com.example.cardbattle.api.user.UserRepository
 import org.springframework.http.HttpStatus
@@ -23,8 +24,10 @@ class GoogleAuthController(private val users: UserRepository) {
         val email = token.getClaimAsString("email") ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Token has no email")
         val name = token.getClaimAsString("name") ?: email
         val existing = users.findByGoogleSubject(googleSubject)
-        val user = existing ?: users.save(
-            UserEntity(
+        val user = users.save(
+            existing?.apply {
+                displayName = name
+            } ?: UserEntity(
                 googleSubject = googleSubject,
                 email = email,
                 displayName = name
@@ -37,10 +40,3 @@ class GoogleAuthController(private val users: UserRepository) {
         )
     }
 }
-
-data class UserResponse(
-    val id: Int?,
-    val email: String,
-    val displayName: String,
-    val isAdmin: Boolean
-)

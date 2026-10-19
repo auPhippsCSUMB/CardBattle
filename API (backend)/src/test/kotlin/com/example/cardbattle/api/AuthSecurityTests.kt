@@ -13,11 +13,14 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.web.bind.annotation.RequestMethod
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
@@ -29,6 +32,8 @@ import com.example.cardbattle.api.user.UserRepository
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 
 /** Exercises the real filter chain and Boot-configured JWT decoder with local signing keys. */
@@ -47,8 +52,28 @@ class AuthSecurityTests {
     @Autowired
     lateinit var users: UserRepository
 
+    @Autowired
+    @Qualifier("requestMappingHandlerMapping")
+    lateinit var routes: RequestMappingHandlerMapping
+
     @BeforeEach
     fun clearUsers() = users.deleteAll()
+
+    @Test
+    fun `Google routes replace redundant password and profile routes`() {
+        val mappings = routes.handlerMethods.keys.flatMap { mapping ->
+            mapping.patternValues.flatMap { path ->
+                mapping.methodsCondition.methods.map { method -> method to path }
+            }
+        }.toSet()
+
+        assertFalse(RequestMethod.POST to "/api/v1/users" in mappings)
+        assertFalse(RequestMethod.PATCH to "/api/v1/users/me" in mappings)
+        assertFalse(RequestMethod.GET to "/api/v1/users/me" in mappings)
+        assertTrue(RequestMethod.POST to "/api/v1/auth/google" in mappings)
+        assertTrue(RequestMethod.GET to "/api/v1/auth/me" in mappings)
+        assertTrue(RequestMethod.PUT to "/api/v1/users/me/display-name" in mappings)
+    }
 
     @Test
     fun `valid signed token returns its verified user claims`() {
@@ -121,13 +146,14 @@ class AuthSecurityTests {
             .andExpect(jsonPath("$.email").value("player@example.com"))
             .andExpect(jsonPath("$.displayName").value("Test Player"))
             .andExpect(jsonPath("$.isAdmin").value(false))
+            .andExpect(jsonPath("$.role").doesNotExist())
 
         assertEquals(1L, users.count())
         assertEquals("player@example.com", users.findByGoogleSubject("test-google-subject")?.email)
     }
 
     @Test
-    fun `repeat Google sign in keeps the user's edited name and does not duplicate them`() {
+    fun `repeat Google sign in prioritizes Google name and does not duplicate users`() {
         mvc.perform(post("/api/v1/auth/google").header("Authorization", "Bearer ${token()}"))
             .andExpect(status().isCreated)
         val user = users.findByGoogleSubject("test-google-subject")!!
@@ -136,11 +162,11 @@ class AuthSecurityTests {
 
         mvc.perform(post("/api/v1/auth/google").header("Authorization", "Bearer ${token(name = "New Google Name")}"))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.displayName").value("Captain"))
+            .andExpect(jsonPath("$.displayName").value("New Google Name"))
             .andExpect(jsonPath("$.id").value(user.id))
 
         assertEquals(1L, users.count())
-        assertEquals("Captain", users.findByGoogleSubject("test-google-subject")?.displayName)
+        assertEquals("New Google Name", users.findByGoogleSubject("test-google-subject")?.displayName)
     }
 
     @Test
@@ -152,6 +178,18 @@ class AuthSecurityTests {
             .andExpect(status().isUnauthorized)
 
         assertEquals(0L, users.count())
+    }
+
+    @Test
+    fun `rejected Google token cannot replace an existing display name`() {
+        users.save(UserEntity(googleSubject = "test-google-subject", email = "player@example.com", displayName = "Saved Name"))
+
+        mvc.perform(post("/api/v1/auth/google")
+            .header("Authorization", "Bearer ${token(audience = "another-client", name = "Unverified Name")}"))
+            .andExpect(status().isUnauthorized)
+
+        assertEquals("Saved Name", users.findByGoogleSubject("test-google-subject")?.displayName)
+        assertEquals(1L, users.count())
     }
 
     @Test

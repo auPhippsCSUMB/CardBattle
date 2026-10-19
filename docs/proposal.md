@@ -10,7 +10,7 @@ API if they plan on using our app to create, trade, and battle cards as their ow
 ## 2. Resources
 | Resource       | Key fields                                                           | Relationships                                      |
 | -------------- | -------------------------------------------------------------------- | -------------------------------------------------- |
-| User           | id, email, displayName, role, password, isAdmin                      | Each user owns 0 to many cards, decks, and wins    |
+| User           | id, googleSubject, email, displayName, isAdmin                      | Each user owns 0 to many cards, decks, and wins    |
 | Card           | id, name, imgURL, description, type, author(fk)                      | Each card is authored by one user                  |
 | User_owns_card | id, userId(fk), cardId(fk), value                                    | Each card is owned by one to many users            |
 | Deck           | id, userId(fk), name                                                 | Each deck is created by one user                   |
@@ -26,10 +26,9 @@ try changes at https://mermaid.live):
 erDiagram
     User {
         INT id PK
+        VARCHAR(255) google_subject UK
         VARCHAR(255) email
         VARCHAR(100) displayName
-        VARCHAR(50) role
-        VARCHAR(255) password
         BOOLEAN isAdmin
     }
 
@@ -93,15 +92,20 @@ erDiagram
 
 ## 4. Endpoints
 
+Google sign-in creates or finds the user from a verified Google ID token. Each successful
+sign-in refreshes the stored display name from Google, falling back to email if no name
+claim is present. There is no password signup. The remaining CRUD scaffolds describe
+planned capabilities; their admin labels do not imply authorization is implemented.
+
 | Verb   | Path                                                               | Auth   | Purpose                                                                 |
 | ------ | ------------------------------------------------------------------ | ------ | ----------------------------------------------------------------------- |
-| POST   | /api/v1/users                                                      | public | create a user                                                            |
-| GET    | /api/v1/users/me                                                   | user   | get my profile                                                           |
-| PATCH  | /api/v1/users/me                                                   | user   | edit my profile                                                          |
+| POST   | /api/v1/auth/google                                                | Google bearer token | sign in or create a user from verified Google claims           |
+| GET    | /api/v1/auth/me                                                    | Google bearer token | get verified Google subject, email, and name                    |
+| PUT    | /api/v1/users/me/display-name                                      | user   | edit my display name until the next Google sign-in                        |
 | DELETE | /api/v1/users/me                                                   | user   | delete my user                                                           |
 | GET    | /api/v1/users?page=0&size=20&displayName=gideon&sort=displayName,asc | admin  | list all users (paginated, filter by displayName, sort by displayName)   |
 | GET    | /api/v1/users/{userId}                                             | admin  | get one user                                                             |
-| PATCH  | /api/v1/users/{userId}                                             | admin  | update a user's role/admin state                                         |
+| PATCH  | /api/v1/users/{userId}                                             | admin  | update a user's admin state                                              |
 | DELETE | /api/v1/users/{userId}                                             | admin  | delete a user                                                            |
 | GET    | /api/v1/cards?page=0&size=20&type=mage&sort=name,asc               | user   | list my authored cards (paginated, filter by type, sort by name)         |
 | POST   | /api/v1/cards                                                      | user   | create a card                                                            |
