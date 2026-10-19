@@ -10,6 +10,7 @@ import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.SignedJWT
 import com.sun.net.httpserver.HttpServer
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
@@ -18,10 +19,17 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.net.InetSocketAddress
 import java.time.Instant
 import java.util.Date
+import com.example.cardbattle.api.user.UserEntity
+import com.example.cardbattle.api.user.UserRepository
+import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import kotlin.test.assertEquals
+
 
 /** Exercises the real filter chain and Boot-configured JWT decoder with local signing keys. */
 @SpringBootTest(properties = [
@@ -36,6 +44,11 @@ import java.util.Date
 class AuthSecurityTests {
     @Autowired
     lateinit var mvc: MockMvc
+    @Autowired
+    lateinit var users: UserRepository
+
+    @BeforeEach
+    fun clearUsers() = users.deleteAll()
 
     @Test
     fun `valid signed token returns its verified user claims`() {
@@ -76,6 +89,114 @@ class AuthSecurityTests {
             .andExpect(jsonPath("$.status").value("UP"))
     }
 
+    @Test
+    fun `signed in user can change their display name`() {
+        users.save(
+            UserEntity(
+                googleSubject = "test-google-subject",
+                email = "player@example.com",
+                displayName = "Old Name"
+            )
+        )
+
+        mvc.perform(
+            put("/api/v1/users/me/display-name")
+                .header("Authorization", "Bearer ${token()}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"displayName":"  Captain  "}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.displayName").value("Captain"))
+
+        assertEquals(
+            "Captain",
+            users.findByGoogleSubject("test-google-subject")?.displayName
+        )
+    }
+
+    @Test
+    fun `first Google sign in registers user from verified token`() {
+        mvc.perform(post("/api/v1/auth/google").header("Authorization", "Bearer ${token()}"))
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.email").value("player@example.com"))
+            .andExpect(jsonPath("$.displayName").value("Test Player"))
+            .andExpect(jsonPath("$.isAdmin").value(false))
+
+        assertEquals(1L, users.count())
+        assertEquals("player@example.com", users.findByGoogleSubject("test-google-subject")?.email)
+    }
+
+    @Test
+    fun `repeat Google sign in keeps the user's edited name and does not duplicate them`() {
+        mvc.perform(post("/api/v1/auth/google").header("Authorization", "Bearer ${token()}"))
+            .andExpect(status().isCreated)
+        val user = users.findByGoogleSubject("test-google-subject")!!
+        user.displayName = "Captain"
+        users.save(user)
+
+        mvc.perform(post("/api/v1/auth/google").header("Authorization", "Bearer ${token(name = "New Google Name")}"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.displayName").value("Captain"))
+            .andExpect(jsonPath("$.id").value(user.id))
+
+        assertEquals(1L, users.count())
+        assertEquals("Captain", users.findByGoogleSubject("test-google-subject")?.displayName)
+    }
+
+    @Test
+    fun `Google sign in needs a valid token before it can create a user`() {
+        mvc.perform(post("/api/v1/auth/google"))
+            .andExpect(status().isUnauthorized)
+        mvc.perform(post("/api/v1/auth/google")
+            .header("Authorization", "Bearer ${token(audience = "another-client")}"))
+            .andExpect(status().isUnauthorized)
+
+        assertEquals(0L, users.count())
+    }
+
+    @Test
+    fun `display name update needs a valid token`() {
+        users.save(UserEntity(googleSubject = "test-google-subject", email = "player@example.com", displayName = "Old Name"))
+        val request = put("/api/v1/users/me/display-name")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"displayName":"Attacker"}""")
+
+        mvc.perform(request).andExpect(status().isUnauthorized)
+        mvc.perform(put("/api/v1/users/me/display-name")
+            .header("Authorization", "Bearer ${token(expires = Instant.now().minusSeconds(300))}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"displayName":"Attacker"}"""))
+            .andExpect(status().isUnauthorized)
+
+        assertEquals("Old Name", users.findByGoogleSubject("test-google-subject")?.displayName)
+    }
+
+    @Test
+    fun `one user's token cannot edit another user's display name`() {
+        users.save(UserEntity(googleSubject = "test-google-subject", email = "player@example.com", displayName = "Old Name"))
+
+        mvc.perform(put("/api/v1/users/me/display-name")
+            .header("Authorization", "Bearer ${token(subject = "different-google-subject")}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"displayName":"Attacker"}"""))
+            .andExpect(status().isNotFound)
+
+        assertEquals("Old Name", users.findByGoogleSubject("test-google-subject")?.displayName)
+    }
+
+    @Test
+    fun `blank display name is rejected without changing the saved user`() {
+        users.save(UserEntity(googleSubject = "test-google-subject", email = "player@example.com", displayName = "Old Name"))
+
+        mvc.perform(put("/api/v1/users/me/display-name")
+            .header("Authorization", "Bearer ${token()}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"displayName":"   "}"""))
+            .andExpect(status().isBadRequest)
+
+        assertEquals("Old Name", users.findByGoogleSubject("test-google-subject")?.displayName)
+    }
+
     private fun rejected(value: String) {
         mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer $value"))
             .andExpect(status().isUnauthorized)
@@ -86,13 +207,15 @@ class AuthSecurityTests {
         issuer: String = "https://accounts.google.com",
         audience: String = "cardbattle-test-client",
         expires: Instant = Instant.now().plusSeconds(300),
-        key: RSAKey = signingKey
+        key: RSAKey = signingKey,
+        subject: String = "test-google-subject",
+        name: String = "Test Player",
     ): String {
         val claims = JWTClaimsSet.Builder()
-            .issuer(issuer).audience(audience).subject("test-google-subject")
+            .issuer(issuer).audience(audience).subject(subject)
             .issueTime(Date.from(Instant.now().minusSeconds(600)))
             .expirationTime(Date.from(expires))
-            .claim("email", "player@example.com").claim("name", "Test Player").build()
+            .claim("email", "player@example.com").claim("name", name).build()
         return SignedJWT(JWSHeader.Builder(JWSAlgorithm.RS256).keyID("test-key").build(), claims)
             .apply { sign(RSASSASigner(key)) }.serialize()
     }

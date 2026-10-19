@@ -18,18 +18,23 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.cardbattle.R
 import com.example.cardbattle.data.LocalAuthManager
+import com.example.cardbattle.data.remote.UserProfile
+import com.example.cardbattle.data.remote.signInAndGetUser
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.security.SecureRandom
+import android.util.Log
 
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit = {},
     onNavigateToSignUp: () -> Unit = {},
     requestIdToken: (suspend () -> String)? = null,
+    authenticateWithBackend: suspend (String) -> UserProfile = { signInAndGetUser(it) },
+    onSignedIn: (String, UserProfile) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -101,14 +106,21 @@ fun LoginScreen(
                         username.isBlank() || password.isBlank() -> {
                             message = "Please enter username and password"
                         }
-                        else -> {
-                            val result = authManager.login(username.trim(), password)
-                            result.onSuccess {
-                                onLoginSuccess()
-                            }.onFailure { err ->
-                                message = err.message ?: "Login failed"
-                            }
+                        if (idToken.isBlank()) {
+                            message = "No Google ID token received. Please try again."
+                        } else {
+                            val user = authenticateWithBackend(idToken)
+                            onSignedIn(idToken, user)
                         }
+                    } catch (exception: GetCredentialCancellationException) {
+                        message = "Sign-in cancelled."
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (exception: Exception) {
+                        Log.e("CardBattleLogin", "Sign-in failed", exception)
+                        message = "Google sign-in failed. Please try again."
+                    } finally {
+                        loading = false
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
