@@ -4,8 +4,8 @@ data class BattleResponse(
     val id: Long,
     val winningUser: Long,
     val losingUser: Long,
-    val winningCard: Long,
-    val losingCard: Long,
+    val winningCard: Long?,
+    val losingCard: Long?,
     val occurredAt: String? = null
 )
 

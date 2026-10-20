@@ -3,8 +3,13 @@ package com.example.cardbattle.api.card
 import com.example.cardbattle.api.dataObjects.CardCreateRequest
 import com.example.cardbattle.api.dataObjects.CardResponse
 import com.example.cardbattle.api.dataObjects.CardType
+import com.example.cardbattle.api.dataObjects.PageMeta
+import com.example.cardbattle.api.dataObjects.PageResponse
 import com.example.cardbattle.api.user.UserRepository
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -56,6 +61,33 @@ class CardService(
     }
 
     @Transactional(readOnly = true)
+    fun listMyCards(
+        googleSubject: String,
+        page: Int,
+        size: Int,
+        type: CardType?,
+        sort: String,
+    ): PageResponse<CardResponse> {
+        val results = cards.findMyCards(googleSubject, type, pageRequest(page, size, sort))
+        return toPageResponse(results)
+    }
+
+    @Transactional(readOnly = true)
+    fun listAllCards(
+        page: Int,
+        size: Int,
+        type: CardType?,
+        author: Int?,
+        sort: String,
+    ): PageResponse<CardResponse> {
+        if (author != null && author <= 0) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Author ID must be positive")
+        }
+        val results = cards.findAllCards(type, author, pageRequest(page, size, sort))
+        return toPageResponse(results)
+    }
+
+    @Transactional(readOnly = true)
     fun getMyCard(cardId: Int, googleSubject: String): CardResponse {
         return toResponse(findMyCard(cardId, googleSubject))
     }
@@ -90,6 +122,41 @@ class CardService(
     private fun findMyCard(cardId: Int, googleSubject: String): CardEntity {
         return cards.findByIdAndAuthorGoogleSubject(cardId, googleSubject)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found")
+    }
+
+    private fun pageRequest(page: Int, size: Int, sort: String): PageRequest {
+        if (page < 0 || size !in 1..100) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Page must be zero or greater and size must be between 1 and 100",
+            )
+        }
+
+        val parts = sort.split(",").map { it.trim() }
+        if (parts.size != 2 || parts[0] !in setOf("name", "id", "type") ||
+            parts[1].lowercase() !in setOf("asc", "desc")) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Sort must be name,asc; id,asc; or type,asc (desc is also supported)",
+            )
+        }
+
+        var ordering = Sort.by(Sort.Direction.fromString(parts[1]), parts[0])
+        // Equal names/types need a consistent order when fetching separate pages.
+        if (parts[0] != "id") ordering = ordering.and(Sort.by("id"))
+        return PageRequest.of(page, size, ordering)
+    }
+
+    private fun toPageResponse(results: Page<CardEntity>): PageResponse<CardResponse> {
+        return PageResponse(
+            content = results.content.map { toResponse(it) },
+            page = PageMeta(
+                size = results.size,
+                number = results.number,
+                totalElements = results.totalElements,
+                totalPages = results.totalPages,
+            ),
+        )
     }
 
     private fun toResponse(card: CardEntity): CardResponse {

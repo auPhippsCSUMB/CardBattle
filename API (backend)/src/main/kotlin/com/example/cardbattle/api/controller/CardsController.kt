@@ -30,8 +30,11 @@ class CardsController(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) type: CardType?,
-        @RequestParam(required = false, defaultValue = "name,asc") sort: String
-    ): PageResponse<CardResponse> = TODO("Implement GET /api/v1/cards")
+        @RequestParam(required = false, defaultValue = "name,asc") sort: String,
+        authentication: JwtAuthenticationToken,
+    ): PageResponse<CardResponse> {
+        return cardService.listMyCards(authentication.token.subject, page, size, type, sort)
+    }
 
     @PostMapping("/api/v1/cards")
     @ResponseStatus(HttpStatus.CREATED)
@@ -73,9 +76,11 @@ class CardsController(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) type: CardType?,
-        @RequestParam(required = false) author: Long?,
-        @RequestParam(required = false, defaultValue = "name,asc") sort: String
-    ): PageResponse<CardResponse> = TODO("Implement GET /api/v1/allCards")
+        @RequestParam(required = false) author: Int?,
+        @RequestParam(required = false, defaultValue = "name,asc") sort: String,
+    ): PageResponse<CardResponse> {
+        return cardService.listAllCards(page, size, type, author, sort)
+    }
 
     @GetMapping("/api/v1/allCards/{cardId}")
     fun getPublicCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/allCards/{cardId}")

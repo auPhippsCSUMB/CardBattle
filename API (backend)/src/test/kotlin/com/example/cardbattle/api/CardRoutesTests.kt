@@ -3,6 +3,7 @@ package com.example.cardbattle.api
 import com.example.cardbattle.api.card.CardEntity
 import com.example.cardbattle.api.card.CardRepository
 import com.example.cardbattle.api.dataObjects.CardType
+import com.example.cardbattle.api.dataObjects.BattleResponse
 import com.example.cardbattle.api.user.UserEntity
 import com.example.cardbattle.api.user.UserRepository
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -14,6 +15,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.mock.mockito.MockBean
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.core.io.ClassPathResource
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.security.oauth2.jwt.BadJwtException
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.jwt.JwtDecoder
@@ -23,6 +26,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 // Real HTTP handling and persistence, with fake tokens and a separate local H2 database.
@@ -57,7 +61,13 @@ class CardRoutesTests {
 
     @BeforeEach
     fun prepareTest() {
-        // Cards reference users, so delete cards first.
+        ResourceDatabasePopulator(ClassPathResource("card-delete-schema.sql"))
+            .execute(checkNotNull(jdbc.dataSource))
+        // Remove dependent test rows before their cards and users.
+        jdbc.update("""DELETE FROM public."Wins" """)
+        jdbc.update("""DELETE FROM public."Card_in_deck" """)
+        jdbc.update("""DELETE FROM public."User_owns_card" """)
+        jdbc.update("""DELETE FROM public."Deck" """)
         cards.deleteAll()
         users.deleteAll()
         val token = Jwt.withTokenValue("valid-token")
@@ -126,20 +136,93 @@ class CardRoutesTests {
 
     @Test
     fun `delete card cannot delete another author's card`() {
-        registerUser()
-        val card = saveCard(registerUser("other-author"))
+        val caller = registerUser()
+        val otherAuthor = registerUser("other-author")
+        val card = saveCard(otherAuthor)
+        val otherCard = saveCard(caller)
+        seedRelatedRecords(card, otherCard, caller, otherAuthor)
 
         mvc.perform(delete("/api/v1/cards/${card.id}")
             .header("Authorization", "Bearer valid-token"))
             .andExpect(status().isNotFound)
 
         assertTrue(cards.existsById(checkNotNull(card.id)))
+        assertEquals(4, rowCount("User_owns_card"))
+        assertEquals(4, rowCount("Card_in_deck"))
+        assertEquals(2, rowCount("Deck"))
+        assertEquals(3, rowCount("Wins"))
+        assertEquals(11, jdbc.queryForObject(
+            """SELECT winningcard FROM public."Wins" WHERE id = 51""", Int::class.java,
+        ))
     }
 
     @Test
-    fun `referenced card returns 409 and stays in the database`() {
+    fun `delete cascades through inventory and deck entries but preserves decks and history`() {
+        val author = registerUser()
+        val owner = registerUser("owner")
+        val opponent = registerUser("opponent")
+        val card = saveCard(author)
+        val otherCard = saveCard(author, CardType.MAGE)
+        seedRelatedRecords(card, otherCard, owner, opponent)
+
+        mvc.perform(delete("/api/v1/cards/${card.id}")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isNoContent)
+
+        assertFalse(cards.existsById(checkNotNull(card.id)))
+        assertTrue(cards.existsById(checkNotNull(otherCard.id)))
+        assertEquals(3L, users.count())
+        assertEquals(2, rowCount("User_owns_card"))
+        assertEquals(0, jdbc.queryForObject(
+            """SELECT COUNT(*) FROM public."User_owns_card" WHERE cardid = ?""",
+            Int::class.java, card.id,
+        ))
+        assertEquals(2, rowCount("Card_in_deck"))
+        assertEquals(2, rowCount("Deck"))
+        // The three-card deck becomes incomplete; the other deck survives even when empty.
+        assertEquals(2, jdbc.queryForObject(
+            """SELECT COUNT(*) FROM public."Card_in_deck" WHERE deckid = 31""", Int::class.java,
+        ))
+        assertEquals(0, jdbc.queryForObject(
+            """SELECT COUNT(*) FROM public."Card_in_deck" WHERE deckid = 32""", Int::class.java,
+        ))
+        assertEquals(3, rowCount("Wins"))
+        assertNull(jdbc.queryForObject(
+            """SELECT winningcard FROM public."Wins" WHERE id = 51""", Int::class.java,
+        ))
+        assertEquals(21, jdbc.queryForObject(
+            """SELECT losingcard FROM public."Wins" WHERE id = 51""", Int::class.java,
+        ))
+        assertEquals(22, jdbc.queryForObject(
+            """SELECT winningcard FROM public."Wins" WHERE id = 52""", Int::class.java,
+        ))
+        assertNull(jdbc.queryForObject(
+            """SELECT losingcard FROM public."Wins" WHERE id = 52""", Int::class.java,
+        ))
+        assertEquals(21, jdbc.queryForObject(
+            """SELECT winningcard FROM public."Wins" WHERE id = 53""", Int::class.java,
+        ))
+        assertEquals(22, jdbc.queryForObject(
+            """SELECT losingcard FROM public."Wins" WHERE id = 53""", Int::class.java,
+        ))
+    }
+
+    @Test
+    fun `battle responses can represent deleted card references`() {
+        val battle = BattleResponse(
+            id = 51, winningUser = 1, losingUser = 2,
+            winningCard = null, losingCard = null,
+        )
+        val response = json.writeValueAsString(battle)
+        assertTrue(json.readTree(response).path("winningCard").isNull)
+        assertTrue(json.readTree(response).path("losingCard").isNull)
+        assertEquals(battle, json.readValue(response, BattleResponse::class.java))
+    }
+
+    @Test
+    fun `an unrelated restrictive foreign key still returns 409 without deleting the card`() {
         val card = saveCard(registerUser())
-        // Simulate the existing Railway inventory foreign key without adding inventory features.
+        // Fallback for a future relationship that has not enabled cascading deletion.
         jdbc.execute("""CREATE TABLE card_test_reference (
             card_id INTEGER REFERENCES public."Card"(id)
         )""")
@@ -235,4 +318,30 @@ class CardRoutesTests {
 
     private fun saveCard(author: UserEntity, type: CardType = CardType.WARRIOR): CardEntity =
         cards.save(CardEntity(name = "Test Warrior", type = type, author = author))
+
+    private fun rowCount(table: String): Int =
+        checkNotNull(jdbc.queryForObject("""SELECT COUNT(*) FROM public."$table" """, Int::class.java))
+
+    private fun seedRelatedRecords(
+        card: CardEntity,
+        otherCard: CardEntity,
+        owner: UserEntity,
+        opponent: UserEntity,
+    ) {
+        jdbc.update("""INSERT INTO public."User_owns_card" (id, userid, cardid)
+            VALUES (11, ?, ?), (12, ?, ?), (21, ?, ?), (22, ?, ?)""",
+            owner.id, card.id, opponent.id, card.id,
+            owner.id, otherCard.id, owner.id, otherCard.id,
+        )
+        jdbc.update("""INSERT INTO public."Deck" (id, userid, name)
+            VALUES (31, ?, 'Three-card deck'), (32, ?, 'Single-card deck')""",
+            owner.id, opponent.id,
+        )
+        jdbc.update("""INSERT INTO public."Card_in_deck" (id, cardid, deckid)
+            VALUES (41, 11, 31), (42, 21, 31), (43, 22, 31), (44, 12, 32)""")
+        jdbc.update("""INSERT INTO public."Wins" (id, winninguser, losinguser, winningcard, losingcard)
+            VALUES (51, ?, ?, 11, 21), (52, ?, ?, 22, 12), (53, ?, ?, 21, 22)""",
+            owner.id, opponent.id, owner.id, opponent.id, owner.id, opponent.id,
+        )
+    }
 }
