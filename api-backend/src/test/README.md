@@ -1,6 +1,6 @@
 # Backend tests
 
-From `API (backend)`, run `bash ./gradlew test` (or `bash ./gradlew check` for coverage checks).
+From `api-backend`, run `bash ./gradlew test` (or `bash ./gradlew check` for coverage checks).
 No Railway credentials or Google account are needed. Tests use H2 and an ephemeral local
 HTTP key server. `AuthSecurityTests` sends real RSA-signed test JWTs through the application's
 security filter and Boot-configured decoder. It checks successful claims, missing/malformed
@@ -176,11 +176,11 @@ WHERE id = 123;
 
 ## Live Railway connection
 
-Run Railway commands from `API (backend)`, where this project's Railway link is configured.
+Run Railway commands from `api-backend`, where this project's Railway link is configured.
 Following the private SSH setup in the root README, start the tunnel in one terminal:
 
 ```bash
-cd "API (backend)" # omit if already in this directory
+cd "api-backend" # omit if already in this directory
 railway connect Postgres --tunnel-only --port 42863
 ```
 
@@ -189,7 +189,7 @@ Keep that terminal open; a public database endpoint is not required.
 Then in a separate Bash terminal:
 
 ```bash
-cd "API (backend)" # omit if already in this directory
+cd "api-backend" # omit if already in this directory
 set -a
 source .env
 set +a
@@ -211,7 +211,7 @@ local `idToken` variable; do not add token logging. This step requires an actual
 and consent UI. Get the account's expected `sub` from the locally inspected token payload
 (decoding a payload does not verify its signature) and compare it with the API's verified result.
 
-In a separate **Bash** terminal in `API (backend)`:
+In a separate **Bash** terminal in `api-backend`:
 
 ```bash
 export CARDBATTLE_API_URL='http://localhost:8080'

@@ -39,5 +39,5 @@ needed; do not copy them into logs, screenshots, or test fixtures.
 
 Railway credentials belong only in the backend. The frontend communicates with Spring
 over HTTP and never connects directly to PostgreSQL. Backend authentication/security tests
-use local signing keys and an in-memory database; run them from `API (backend)` with
+use local signing keys and an in-memory database; run them from `api-backend` with
 `bash ./gradlew test --tests '*AuthSecurityTests'`.
