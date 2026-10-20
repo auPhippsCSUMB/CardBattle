@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: API (backend)
+        working-directory: api-backend
 
     steps:
       - name: Check out repository
@@ -38,6 +38,6 @@ jobs:
         with:
           name: jacoco-report
           path: |
-            API (backend)/build/reports/jacoco/test/html
-            API (backend)/build/reports/jacoco/test/jacocoTestReport.xml
+            api-backend/build/reports/jacoco/test/html
+            api-backend/build/reports/jacoco/test/jacocoTestReport.xml
           if-no-files-found: warn
