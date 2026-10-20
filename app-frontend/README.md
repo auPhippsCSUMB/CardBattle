@@ -1,6 +1,6 @@
 # Frontend sign-in tests
 
-From `App (frontend)`, with an Android emulator/device running (API 34 or higher):
+From `app-frontend`, with an Android emulator/device running (API 34 or higher):
 
 ```bash
 bash ./gradlew :app:connectedDebugAndroidTest
