@@ -3,7 +3,7 @@ info:
   title: CardBattle API
   version: 1.0.0
   description: |
-    Implemented card, Google authentication, and display-name routes.
+    Implemented card, deck management/membership, Google authentication, and display-name routes.
     Other controller TODOs are excluded until implemented. All routes except health
     require a verified Google ID token. Errors are described by status code; the
     application does not currently guarantee a uniform error response body.
@@ -14,6 +14,8 @@ security:
 tags:
   - name: Cards
     description: Authored card management and the shared catalog.
+  - name: Decks
+    description: Owner-only deck creation, lookup, deletion, and membership editing.
   - name: Authentication
     description: Google identity verification and backend user registration.
   - name: Users
@@ -21,6 +23,153 @@ tags:
   - name: Health
     description: Service health.
 paths:
+  /api/v1/decks:
+    post:
+      tags: [Decks]
+      operationId: createDeck
+      summary: Create an empty deck owned by the signed-in user
+      description: Requires a user registered through Google sign-in. Owner identity comes from the token, not the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckCreate'
+      responses:
+        '201':
+          description: Created empty deck. Repeated requests create separate decks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/decks/{deckId}:
+    parameters:
+      - name: deckId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+    get:
+      tags: [Decks]
+      operationId: getDeck
+      summary: Get metadata for a deck owned by the signed-in user
+      description: Missing decks and other users' decks return 404. Does not include card membership.
+      responses:
+        '200':
+          description: The requested deck.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Decks]
+      operationId: deleteDeck
+      summary: Delete a deck owned by the signed-in user
+      description: Removes deck membership rows and the deck in one transaction. Cards, inventory, other decks, users, and battle history remain. Any blocking constraint rolls back both deletions.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/decks/{deckId}/cards:
+    parameters:
+      - $ref: '#/components/parameters/DeckId'
+    post:
+      tags: [Decks]
+      operationId: addCardToDeck
+      summary: Add one of your inventory copies to your deck
+      description: cardId is User_owns_card.id, not Card.id. userId must match the signed-in owner. No deck-size or duplicate-entry rules are enforced in this batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckCardCreate'
+      responses:
+        '201':
+          description: Created membership row with a generated ID; inventory is unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeckCard'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/decks/{deckId}/cards/{cardInDeckId}:
+    parameters:
+      - $ref: '#/components/parameters/DeckId'
+      - name: cardInDeckId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+    patch:
+      tags: [Decks]
+      operationId: updateDeckCard
+      summary: Update the membership type metadata in your deck
+      description: The membership must belong to the deck in the path. Does not change the underlying Card.type. Omitted type is a no-op; explicit null or an invalid enum is rejected. Other fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckCardPatch'
+      responses:
+        '200':
+          description: Updated or unchanged membership. Null inventory references return 409.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeckCard'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Decks]
+      operationId: removeCardFromDeck
+      summary: Remove a membership row from your deck
+      description: Deletes only Card_in_deck. Inventory, cards, decks, other membership rows, and battle history remain.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/cards:
     get:
       tags: [Cards]
@@ -244,6 +393,13 @@ components:
       bearerFormat: JWT
       description: Google-issued ID token targeting the configured Google Web client ID.
   parameters:
+    DeckId:
+      name: deckId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int32
     CardId:
       name: cardId
       in: path
@@ -291,6 +447,79 @@ components:
         enum: ['name,asc', 'name,desc', 'id,asc', 'id,desc', 'type,asc', 'type,desc']
         default: 'name,asc'
   schemas:
+    DeckCard:
+      type: object
+      required: [id, deckId, cardId, userId, type, card]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Card_in_deck.id; use this as cardInDeckId for PATCH and DELETE.
+        deckId:
+          type: integer
+          format: int64
+        cardId:
+          type: integer
+          format: int64
+          description: User_owns_card.id, not Card.id.
+        userId:
+          type: integer
+          format: int64
+          description: Authenticated deck owner's ID.
+        type:
+          type: string
+          nullable: true
+          enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE, null]
+          description: Membership metadata; older rows may be null.
+        card:
+          type: object
+          nullable: true
+          description: Always null in this batch; the underlying card is not embedded.
+    DeckCardCreate:
+      type: object
+      required: [cardId, userId, type]
+      properties:
+        cardId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2147483647
+          description: An inventory ID owned by the signed-in user.
+        userId:
+          type: integer
+          format: int64
+          description: Must match the authenticated deck owner.
+        type:
+          $ref: '#/components/schemas/CardType'
+    DeckCardPatch:
+      type: object
+      description: Empty object is a no-op. Only type is editable; explicit null is invalid.
+      properties:
+        type:
+          $ref: '#/components/schemas/CardType'
+    Deck:
+      type: object
+      required: [id, userId, name, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        createdAt:
+          type: string
+          nullable: true
+          description: Always null; the database has no creation timestamp column.
+    DeckCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Trimmed before validation; the trimmed name must contain 1 to 150 characters.
     CardType:
       type: string
       enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE]
@@ -474,6 +703,6 @@ components:
     Unauthorized:
       description: Missing, expired, or otherwise invalid Google token.
     NotFound:
-      description: Card/user not found, no random-card match, or the caller is not the author for an author-only action.
+      description: Card/deck/user/inventory/entry not found, no random-card match, or the caller is not the author/owner for a private action.
     Conflict:
-      description: An additional database constraint prevents deletion.
+      description: A database constraint prevents the operation, or a legacy deck entry has no inventory reference.

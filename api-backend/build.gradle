@@ -88,7 +88,7 @@ jacocoTestCoverageVerification {
 	violationRules {
 		rule {
 			element = 'CLASS'
-            includes = ['com.example.cardbattle.api.card.CardService']
+            includes = ['com.example.cardbattle.api.card.CardService', 'com.example.cardbattle.api.deck.DeckService']
 			limit {
 				counter = 'LINE'
 				value = 'COVEREDRATIO'
