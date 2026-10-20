@@ -1,10 +1,12 @@
 package com.example.cardbattle.api.card
 
 import com.example.cardbattle.api.dataObjects.CardCreateRequest
+import com.example.cardbattle.api.dataObjects.CardPatchRequest
 import com.example.cardbattle.api.dataObjects.CardResponse
 import com.example.cardbattle.api.dataObjects.CardType
 import com.example.cardbattle.api.dataObjects.PageMeta
 import com.example.cardbattle.api.dataObjects.PageResponse
+import com.example.cardbattle.api.dataObjects.StatsResponse
 import com.example.cardbattle.api.user.UserRepository
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.Page
@@ -25,21 +27,8 @@ class CardService(
         request: CardCreateRequest,
         googleSubject: String,
     ): CardResponse {
-        val name = request.name.trim()
-
-        if (name.isBlank() || name.length > 150) {
-            throw ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "Card name must contain 1–150 characters",
-            )
-        }
-
-        if ((request.imgURL?.length ?: 0) > 500) {
-            throw ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "Image URL must not exceed 500 characters",
-            )
-        }
+        val name = validateName(request.name)
+        validateImageUrl(request.imgURL)
 
         val author = users.findByGoogleSubject(googleSubject)
             ?: throw ResponseStatusException(
@@ -93,6 +82,33 @@ class CardService(
     }
 
     @Transactional(readOnly = true)
+    fun getPublicCard(cardId: Int): CardResponse {
+        val card = cards.findById(cardId).orElseThrow {
+            ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found")
+        }
+        return toResponse(card)
+    }
+
+    @Transactional(readOnly = true)
+    fun getCardStats(cardId: Int): StatsResponse {
+        if (!cards.existsById(cardId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found")
+        }
+
+        val wins = cards.countWinsForCard(cardId)
+        val losses = cards.countLossesForCard(cardId)
+        val appearances = wins.toDouble() + losses
+
+        return StatsResponse(
+            wins = wins,
+            losses = losses,
+            // A battle between two copies of this card is still just one battle.
+            totalBattles = cards.countBattlesForCard(cardId),
+            winRate = if (appearances == 0.0) 0.0 else wins / appearances,
+        )
+    }
+
+    @Transactional(readOnly = true)
     fun getRandomCard(type: CardType?): CardResponse {
         val card = if (type == null) {
             cards.findRandomCard()
@@ -101,6 +117,32 @@ class CardService(
         } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "No matching cards found")
 
         return toResponse(card)
+    }
+
+    @Transactional
+    fun updateCard(cardId: Int, request: CardPatchRequest, googleSubject: String): CardResponse {
+        val card = findMyCard(cardId, googleSubject)
+        val fields = request.providedFields
+
+        // Validate before changing the entity, so a bad field cannot partially update it.
+        val name = if ("name" in fields) {
+            validateName(request.name ?: throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Card name cannot be null",
+            ))
+        } else card.name
+        val type = if ("type" in fields) {
+            request.type ?: throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Card type cannot be null",
+            )
+        } else card.type
+        if ("imgURL" in fields) validateImageUrl(request.imgURL)
+
+        card.name = name
+        card.type = type
+        if ("imgURL" in fields) card.imgURL = request.imgURL
+        if ("description" in fields) card.description = request.description
+
+        return toResponse(cards.save(card))
     }
 
     @Transactional
@@ -122,6 +164,24 @@ class CardService(
     private fun findMyCard(cardId: Int, googleSubject: String): CardEntity {
         return cards.findByIdAndAuthorGoogleSubject(cardId, googleSubject)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found")
+    }
+
+    private fun validateName(value: String): String {
+        val name = value.trim()
+        if (name.isBlank() || name.length > 150) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Card name must contain 1–150 characters",
+            )
+        }
+        return name
+    }
+
+    private fun validateImageUrl(value: String?) {
+        if ((value?.length ?: 0) > 500) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "Image URL must not exceed 500 characters",
+            )
+        }
     }
 
     private fun pageRequest(page: Int, size: Int, sort: String): PageRequest {

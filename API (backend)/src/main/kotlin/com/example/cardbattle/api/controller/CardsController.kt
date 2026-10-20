@@ -58,9 +58,12 @@ class CardsController(
 
     @PatchMapping("/api/v1/cards/{cardId}")
     fun updateCard(
-        @PathVariable cardId: Long,
-        @RequestBody request: CardPatchRequest
-    ): CardResponse = TODO("Implement PATCH /api/v1/cards/{cardId}")
+        @PathVariable cardId: Int,
+        @RequestBody request: CardPatchRequest,
+        authentication: JwtAuthenticationToken,
+    ): CardResponse {
+        return cardService.updateCard(cardId, request, authentication.token.subject)
+    }
 
     @DeleteMapping("/api/v1/cards/{cardId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -83,7 +86,9 @@ class CardsController(
     }
 
     @GetMapping("/api/v1/allCards/{cardId}")
-    fun getPublicCard(@PathVariable cardId: Long): CardResponse = TODO("Implement GET /api/v1/allCards/{cardId}")
+    fun getPublicCard(@PathVariable cardId: Int): CardResponse {
+        return cardService.getPublicCard(cardId)
+    }
 
     @GetMapping("/api/v1/randomCard")
     fun getRandomCard(@RequestParam(required = false) type: CardType?): CardResponse {
@@ -91,5 +96,7 @@ class CardsController(
     }
 
     @GetMapping("/api/v1/cards/{cardId}/stats")
-    fun getCardStats(@PathVariable cardId: Long): StatsResponse = TODO("Implement GET /api/v1/cards/{cardId}/stats")
+    fun getCardStats(@PathVariable cardId: Int): StatsResponse {
+        return cardService.getCardStats(cardId)
+    }
 }

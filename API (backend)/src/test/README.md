@@ -51,18 +51,31 @@ performs database pagination and its `Page` result supplies the matching totals.
 ## Get and delete cards
 
 Run `bash ./gradlew test --tests '*CardRoutesTests'` for the random-card, get-my-card,
-and delete-card routes. The tests use a separate local H2 database and fake token
+get-public-card, and delete-card routes. The tests use a separate local H2 database and fake token
 verification. Test-only inventory, deck, and battle tables model Railway's foreign keys.
 
 - `GET /api/v1/randomCard` returns any author's card; optional `?type=MAGE` filters it.
   No cards or no matching type returns 404; invalid type names return 400.
 - `GET /api/v1/cards/{cardId}` returns a card only to its author.
+- `GET /api/v1/allCards/{cardId}` returns a card from any author. "Public" means
+  catalog access for signed-in users; it still requires a valid Google bearer token.
+  A missing/deleted card returns 404, and a noninteger or out-of-range ID returns 400.
 - `DELETE /api/v1/cards/{cardId}` deletes a card only for its author and returns 204.
   Inventory entries and their deck entries are deleted automatically. Decks and battle
   results remain, with deleted battle-card references set to null. An unrelated
   restrictive foreign key still returns 409.
-- Missing cards and cards authored by someone else return 404 for the last two routes.
-  All three routes require a valid Google bearer token (otherwise 401).
+- Missing cards and cards authored by someone else return 404 for get-my-card and delete.
+  All four routes require a valid Google bearer token (otherwise 401).
+
+With the backend running, replace 123 below with an existing card ID:
+
+```bash
+curl -i 'http://localhost:8080/api/v1/allCards/123' -H "Authorization: Bearer $CARD_TOKEN"
+```
+
+Expect 200 even if someone else authored the card. Compare with the read-only SQL
+`SELECT id, name, imgurl, description, type, author FROM public."Card" WHERE id = 123;`.
+The read does not create an inventory entry or modify the card.
 
 The random query uses `ORDER BY RANDOM() LIMIT 1`, suitable for the small project
 database. The read routes return data only; requesting a random card does not grant
@@ -79,6 +92,87 @@ incomplete, an empty deck remaining, and winning/losing card references becoming
 without losing battle history or unaffected records. Another author's delete request
 must leave the card and related data intact. `BattleResponse` permits null card IDs;
 `BattleCreateRequest` still requires both IDs for a new battle.
+
+## Card statistics
+
+`GET /api/v1/cards/{cardId}/stats` returns `wins`, `losses`, `totalBattles`, and
+`winRate`. Any signed-in user can view these statistics, across every owner's
+inventory copies of the specified card. A missing/deleted card returns 404,
+invalid integer IDs return 400, and missing/invalid authentication returns 401.
+An existing card without results returns 200 with all four values zero.
+
+The three short repository count queries join `Wins.winningcard/losingcard` to
+`User_owns_card.id`, then filter by `User_owns_card.cardid`.
+`totalBattles` counts distinct battle rows: a match between two copies of the same
+card contributes one win, one loss, but just one battle. `winRate` is
+`wins / (wins + losses)`, a fraction from 0 to 1, or 0 when there are no results.
+It is deliberately not divided by `totalBattles` because of same-card matches.
+
+Left joins preserve the remaining side's stats when the opponent reference is null.
+A null card reference cannot be attributed to its original card, so these statistics
+only include results whose inventory links still exist. No schema migration or new
+inventory/battle entities are needed.
+
+Run `bash ./gradlew test --tests '*CardRoutesTests'` for statistics and other card
+route tests. With the backend running and a fresh token:
+
+```bash
+# Replace 123 with an existing card ID.
+curl -i 'http://localhost:8080/api/v1/cards/123/stats' -H "Authorization: Bearer $CARD_TOKEN"
+```
+
+Compare the counts with this read-only PostgreSQL query (replace 123 throughout):
+
+```sql
+SELECT
+    COUNT(*) FILTER (WHERE winner.cardid = 123) AS wins,
+    COUNT(*) FILTER (WHERE loser.cardid = 123) AS losses,
+    COUNT(*) AS total_battles
+FROM public."Wins" w
+LEFT JOIN public."User_owns_card" winner ON winner.id = w.winningcard
+LEFT JOIN public."User_owns_card" loser ON loser.id = w.losingcard
+WHERE winner.cardid = 123 OR loser.cardid = 123;
+```
+
+## Partial card updates
+
+`PATCH /api/v1/cards/{cardId}` updates only a card authored by the signed-in user
+and returns 200 with the updated `CardResponse`.
+
+- Omitted fields stay unchanged. An empty `{}` is a successful no-op.
+- `name` is trimmed and must have 1–150 characters. `type` must be a valid enum
+  value. Neither accepts explicit null.
+- `imgURL` accepts at most 500 characters or null. `description` accepts text or
+  null. Explicit null clears either optional field.
+- ID and author are not editable. Unknown properties are ignored by the existing
+  Jackson configuration, so sending those fields cannot change them.
+- Invalid input returns 400 without partially applying the other fields. Missing
+  cards and another author's cards return 404. Missing/invalid tokens return 401.
+
+`CardPatchRequest` uses property setters to track supplied fields in an internal,
+JSON-ignored set. This is the small extra mechanism needed to distinguish
+`{}` from `{"description":null}`. Create and patch share the same name/image URL
+validation helpers. No database changes or new dependencies are needed.
+
+Run `bash ./gradlew test --tests '*CardPatchTests'`. Tests use local H2 and mocked
+token verification; successful updates are flushed and reloaded to verify stored values.
+
+With the backend running and a fresh token, replace 123 with a card you authored:
+
+```bash
+curl -i -X PATCH 'http://localhost:8080/api/v1/cards/123' -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{"name":"Ice Mage","type":"MAGE"}'
+curl -i -X PATCH 'http://localhost:8080/api/v1/cards/123' -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{"description":null}'
+# Expect 400 and no changes.
+curl -i -X PATCH 'http://localhost:8080/api/v1/cards/123' -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{"name":"  "}'
+```
+
+Verify with `GET /api/v1/cards/123` or this read-only SQL:
+
+```sql
+SELECT id, name, imgurl, description, type, author
+FROM public."Card"
+WHERE id = 123;
+```
 
 ## Live Railway connection
 

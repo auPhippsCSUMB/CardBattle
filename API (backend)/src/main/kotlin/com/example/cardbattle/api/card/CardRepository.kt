@@ -17,6 +17,22 @@ interface CardRepository : JpaRepository<CardEntity, Int> {
         WHERE (:type IS NULL OR c.type = :type) AND (:author IS NULL OR c.author.id = :author)""")
     fun findAllCards(type: CardType?, author: Int?, pageable: Pageable): Page<CardEntity>
 
+    @Query(value = """SELECT COUNT(*) FROM public."Wins" w
+        JOIN public."User_owns_card" owned ON owned.id = w.winningcard
+        WHERE owned.cardid = :cardId""", nativeQuery = true)
+    fun countWinsForCard(cardId: Int): Int
+
+    @Query(value = """SELECT COUNT(*) FROM public."Wins" w
+        JOIN public."User_owns_card" owned ON owned.id = w.losingcard
+        WHERE owned.cardid = :cardId""", nativeQuery = true)
+    fun countLossesForCard(cardId: Int): Int
+
+    @Query(value = """SELECT COUNT(*) FROM public."Wins" w
+        LEFT JOIN public."User_owns_card" winner ON winner.id = w.winningcard
+        LEFT JOIN public."User_owns_card" loser ON loser.id = w.losingcard
+        WHERE winner.cardid = :cardId OR loser.cardid = :cardId""", nativeQuery = true)
+    fun countBattlesForCard(cardId: Int): Int
+
     @Query(value = """SELECT * FROM public."Card" ORDER BY RANDOM() LIMIT 1""", nativeQuery = true)
     fun findRandomCard(): CardEntity?
 

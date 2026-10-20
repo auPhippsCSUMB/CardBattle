@@ -101,13 +101,141 @@ class CardRoutesTests {
     }
 
     @Test
-    fun `get my card does not expose another author's card`() {
+    fun `public card returns the authored card without changing it`() {
+        val author = registerUser()
+        val card = saveCard(author)
+
+        mvc.perform(get("/api/v1/allCards/${card.id}")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.id").value(card.id))
+            .andExpect(jsonPath("$.name").value("Test Warrior"))
+            .andExpect(jsonPath("$.type").value("WARRIOR"))
+            .andExpect(jsonPath("$.authorId").value(author.id))
+
+        assertEquals(1L, cards.count())
+        assertEquals("Test Warrior", cards.findById(checkNotNull(card.id)).orElseThrow().name)
+    }
+
+    @Test
+    fun `public card returns 404 for a missing card`() {
+        mvc.perform(get("/api/v1/allCards/2147483647")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `public card rejects noninteger and out of range IDs with 400`() {
+        for (id in listOf("not-an-id", "2147483648")) {
+            mvc.perform(get("/api/v1/allCards/$id")
+                .header("Authorization", "Bearer valid-token"))
+                .andExpect(status().isBadRequest)
+        }
+    }
+
+    @Test
+    fun `card stats returns zeros for a card without battle results`() {
+        val card = saveCard(registerUser())
+
+        mvc.perform(get("/api/v1/cards/${card.id}/stats")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.wins").value(0))
+            .andExpect(jsonPath("$.losses").value(0))
+            .andExpect(jsonPath("$.totalBattles").value(0))
+            .andExpect(jsonPath("$.winRate").value(0.0))
+    }
+
+    @Test
+    fun `card stats combines multiple owners and is visible to a nonauthor`() {
+        val author = registerUser("other-author")
+        val owner = registerUser()
+        val card = saveCard(author)
+        val otherCard = saveCard(author, CardType.MAGE)
+        seedRelatedRecords(card, otherCard, owner, author)
+        jdbc.update("""INSERT INTO public."Wins"
+            (id, winninguser, losinguser, winningcard, losingcard)
+            VALUES (54, ?, ?, 12, 21)""", author.id, owner.id)
+
+        mvc.perform(get("/api/v1/cards/${card.id}/stats")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.wins").value(2))
+            .andExpect(jsonPath("$.losses").value(1))
+            .andExpect(jsonPath("$.totalBattles").value(3))
+            .andExpect(jsonPath("$.winRate").value(2.0 / 3))
+    }
+
+    @Test
+    fun `a battle between copies of the same card counts once in total battles`() {
+        val author = registerUser()
+        val opponent = registerUser("opponent")
+        val card = saveCard(author)
+        val otherCard = saveCard(author, CardType.MAGE)
+        seedRelatedRecords(card, otherCard, author, opponent)
+        // Battle 53 uses two inventory copies of otherCard, one on each side.
+        mvc.perform(get("/api/v1/cards/${otherCard.id}/stats")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.wins").value(2))
+            .andExpect(jsonPath("$.losses").value(2))
+            .andExpect(jsonPath("$.totalBattles").value(3))
+            .andExpect(jsonPath("$.winRate").value(0.5))
+    }
+
+    @Test
+    fun `null opponent references preserve the remaining card's stats`() {
+        val author = registerUser()
+        val opponent = registerUser("opponent")
+        val deletedCard = saveCard(author)
+        val remainingCard = saveCard(author, CardType.MAGE)
+        seedRelatedRecords(deletedCard, remainingCard, author, opponent)
+
+        mvc.perform(delete("/api/v1/cards/${deletedCard.id}")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isNoContent)
+        mvc.perform(get("/api/v1/cards/${remainingCard.id}/stats")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.wins").value(2))
+            .andExpect(jsonPath("$.losses").value(2))
+            .andExpect(jsonPath("$.totalBattles").value(3))
+            .andExpect(jsonPath("$.winRate").value(0.5))
+        mvc.perform(get("/api/v1/cards/${deletedCard.id}/stats")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `card stats returns 404 for a missing card`() {
+        mvc.perform(get("/api/v1/cards/2147483647/stats")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `card stats rejects noninteger and out of range IDs with 400`() {
+        for (id in listOf("not-an-id", "2147483648")) {
+            mvc.perform(get("/api/v1/cards/$id/stats")
+                .header("Authorization", "Bearer valid-token"))
+                .andExpect(status().isBadRequest)
+        }
+    }
+
+    @Test
+    fun `another author's card is available through the catalog but not get my card`() {
         registerUser()
         val card = saveCard(registerUser("other-author"))
 
         mvc.perform(get("/api/v1/cards/${card.id}")
             .header("Authorization", "Bearer valid-token"))
             .andExpect(status().isNotFound)
+
+        mvc.perform(get("/api/v1/allCards/${card.id}")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.id").value(card.id))
+            .andExpect(jsonPath("$.authorId").value(card.author.id))
 
         assertTrue(cards.existsById(checkNotNull(card.id)))
     }
@@ -123,6 +251,9 @@ class CardRoutesTests {
 
         assertFalse(cards.existsById(checkNotNull(card.id)))
         mvc.perform(get("/api/v1/cards/${card.id}")
+            .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isNotFound)
+        mvc.perform(get("/api/v1/allCards/${card.id}")
             .header("Authorization", "Bearer valid-token"))
             .andExpect(status().isNotFound)
     }
@@ -293,11 +424,13 @@ class CardRoutesTests {
     }
 
     @Test
-    fun `all three routes require a valid token`() {
+    fun `card lookup random stats and delete routes require a valid token`() {
         val card = saveCard(registerUser())
         for (token in listOf(null, "invalid-token")) {
             val requests = listOf(
                 get("/api/v1/cards/${card.id}"),
+                get("/api/v1/allCards/${card.id}"),
+                get("/api/v1/cards/${card.id}/stats"),
                 get("/api/v1/randomCard"),
                 delete("/api/v1/cards/${card.id}"),
             )
