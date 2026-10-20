@@ -29,6 +29,9 @@ jobs:
       - name: Verify backend build and tests
         run: ./gradlew verify --no-daemon
 
+      - name: Build Docker image
+        run: docker build --file Dockerfile --tag cardbattle-api:ci .
+
       - name: Upload JaCoCo report
         if: always()
         uses: actions/upload-artifact@v4
