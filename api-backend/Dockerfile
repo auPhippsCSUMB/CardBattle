@@ -2,7 +2,7 @@ FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /workspace
 
 COPY . ./
-RUN bash ./gradlew --no-daemon clean bootJar
+RUN chmod +x ./gradlew && ./gradlew --no-daemon clean bootJar
 
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
