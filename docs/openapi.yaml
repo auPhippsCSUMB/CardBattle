@@ -1,80 +1,196 @@
-# Starter OpenAPI contract for CST 438 Project 02.
-# Copy to docs/openapi.yaml in your repo.
-# Render it:   https://editor.swagger.io
-# Lint it:     npx @redocly/cli lint docs/openapi.yaml
-# Mock it:     npx @stoplight/prism-cli mock docs/openapi.yaml -> http://127.0.0.1:4010
 openapi: 3.0.3
 info:
-  title: Card Receiver API
+  title: CardBattle API
   version: 1.0.0
   description: |
-    Contract for Card Receiver / Card Battle. Users create cards that belong to combat classes.
-    Classes follow a cyclic rock-paper-scissors matchup system (Warrior, Brawler, Ranger, Mage, Rogue).
-    Every error follows RFC 9457 Problem Details (see components/schemas/Problem).
-  license:
-    name: MIT
-    url: https://opensource.org/licenses/MIT
-  contact:
-    name: Group 5
-    url: https://github.com/auPhippsCSUMB/CardBattle
-
+    Implemented card, deck management/membership, Google authentication, and display-name routes.
+    Other controller TODOs are excluded until implemented. All routes except health
+    require a verified Google ID token. Errors are described by status code; the
+    application does not currently guarantee a uniform error response body.
 servers:
   - url: http://localhost:8080
-    description: Local (docker compose up)
-  - url: https://your-api.example.com
-    description: Production (replace in Sprint 3)
-
 security:
   - bearerAuth: []
-
 tags:
   - name: Cards
-    description: A user's own battle deck and cards
-  - name: Classes
-    description: Card battle classes and matchup advantages (public catalog)
+    description: Authored card management and the shared catalog.
+  - name: Decks
+    description: Owner-only deck creation, lookup, deletion, and membership editing.
+  - name: Authentication
+    description: Google identity verification and backend user registration.
   - name: Users
-    description: The signed-in user's account
-  - name: Admin
-    description: Admin-only user management
-
+    description: The signed-in user's profile.
+  - name: Health
+    description: Service health.
 paths:
-  /api/v1/cards:
-    get:
-      tags: [Cards]
-      operationId: listMyCards
-      summary: List my cards (paginated, sortable)
-      parameters:
-        - name: cardClass
-          in: query
-          description: Optional filter by combat class
-          schema:
-            $ref: '#/components/schemas/CardClassName'
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Size'
-        - name: sort
-          in: query
-          description: Field and direction, Spring Pageable style.
-          schema:
-            type: string
-            enum: ['createdAt,desc', 'createdAt,asc', 'powerLevel,desc', 'powerLevel,asc']
-            default: 'createdAt,desc'
+  /api/v1/decks:
+    post:
+      tags: [Decks]
+      operationId: createDeck
+      summary: Create an empty deck owned by the signed-in user
+      description: Requires a user registered through Google sign-in. Owner identity comes from the token, not the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckCreate'
       responses:
-        '200':
-          description: One page of the caller's cards
+        '201':
+          description: Created empty deck. Repeated requests create separate decks.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CardPage'
+                $ref: '#/components/schemas/Deck'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/decks/{deckId}:
+    parameters:
+      - name: deckId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+    get:
+      tags: [Decks]
+      operationId: getDeck
+      summary: Get metadata for a deck owned by the signed-in user
+      description: Missing decks and other users' decks return 404. Does not include card membership.
+      responses:
+        '200':
+          description: The requested deck.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Decks]
+      operationId: deleteDeck
+      summary: Delete a deck owned by the signed-in user
+      description: Removes deck membership rows and the deck in one transaction. Cards, inventory, other decks, users, and battle history remain. Any blocking constraint rolls back both deletions.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/decks/{deckId}/cards:
+    parameters:
+      - $ref: '#/components/parameters/DeckId'
+    post:
+      tags: [Decks]
+      operationId: addCardToDeck
+      summary: Add one of your inventory copies to your deck
+      description: cardId is User_owns_card.id, not Card.id. userId must match the signed-in owner. No deck-size or duplicate-entry rules are enforced in this batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckCardCreate'
+      responses:
+        '201':
+          description: Created membership row with a generated ID; inventory is unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeckCard'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/decks/{deckId}/cards/{cardInDeckId}:
+    parameters:
+      - $ref: '#/components/parameters/DeckId'
+      - name: cardInDeckId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+    patch:
+      tags: [Decks]
+      operationId: updateDeckCard
+      summary: Update the membership type metadata in your deck
+      description: The membership must belong to the deck in the path. Does not change the underlying Card.type. Omitted type is a no-op; explicit null or an invalid enum is rejected. Other fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckCardPatch'
+      responses:
+        '200':
+          description: Updated or unchanged membership. Null inventory references return 409.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeckCard'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Decks]
+      operationId: removeCardFromDeck
+      summary: Remove a membership row from your deck
+      description: Deletes only Card_in_deck. Inventory, cards, decks, other membership rows, and battle history remain.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/cards:
+    get:
+      tags: [Cards]
+      operationId: listMyCards
+      summary: List cards authored by the signed-in user
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+            $ref: '#/components/responses/CardPage'
+        '400':
+            $ref: '#/components/responses/BadRequest'
+        '401':
+            $ref: '#/components/responses/Unauthorized'
     post:
       tags: [Cards]
       operationId: createCard
-      summary: Create a new card
+      summary: Create a card with the signed-in user as author
       requestBody:
         required: true
         content:
@@ -83,75 +199,34 @@ paths:
               $ref: '#/components/schemas/CardCreate'
       responses:
         '201':
-          description: Created. POST is not idempotent; two calls create two cards.
-          headers:
-            Location:
-              description: URL of the created card
-              schema:
-                type: string
-                example: /api/v1/cards/42
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Card'
+            $ref: '#/components/responses/CardCreated'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
+            $ref: '#/components/responses/Unauthorized'
+        '404':
+            $ref: '#/components/responses/NotFound'
   /api/v1/cards/{cardId}:
     parameters:
       - $ref: '#/components/parameters/CardId'
     get:
       tags: [Cards]
-      operationId: getCard
-      summary: Get details of one of my cards
+      operationId: getMyCard
+      summary: Get a card authored by the signed-in user
       responses:
         '200':
-          description: The card details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Card'
+            $ref: '#/components/responses/Card'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+            $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-    put:
-      tags: [Cards]
-      operationId: replaceCard
-      summary: Replace a card (idempotent full update)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CardCreate'
-      responses:
-        '200':
-          description: The replaced card
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Card'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+            $ref: '#/components/responses/NotFound'
     patch:
       tags: [Cards]
       operationId: updateCard
-      summary: Partially update fields of a card
+      summary: Partially update an authored card
+      description: Omitted fields stay unchanged. Null clears optional fields only. An empty object is a no-op.
       requestBody:
         required: true
         content:
@@ -160,331 +235,364 @@ paths:
               $ref: '#/components/schemas/CardPatch'
       responses:
         '200':
-          description: The updated card
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Card'
+            $ref: '#/components/responses/Card'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+            $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+            $ref: '#/components/responses/NotFound'
     delete:
       tags: [Cards]
       operationId: deleteCard
-      summary: Delete a card
+      summary: Delete an authored card
+      description: Deletes inventory and deck entries through foreign keys; decks and battle results remain, with removed battle-card references set to null.
       responses:
         '204':
-          description: Deleted successfully. No content returned.
+            $ref: '#/components/responses/Deleted'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+            $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/classes:
+            $ref: '#/components/responses/NotFound'
+        '409':
+            $ref: '#/components/responses/Conflict'
+  /api/v1/allCards:
     get:
-      tags: [Classes]
-      operationId: listClasses
-      summary: Browse the class catalog and match advantages (public)
-      security: []
-      responses:
-        '200':
-          description: List of combat classes and rock-paper-scissors matchup rules
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CardClass'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/users/me:
-    delete:
-      tags: [Users]
-      operationId: deleteMyAccount
-      summary: Delete my account and cascade delete all owned cards
-      description: Deletes the signed-in user and any cards they own.
-      responses:
-        '204':
-          description: Account deleted. The token is invalidated.
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/users:
-    get:
-      tags: [Admin]
-      operationId: listUsers
-      summary: List all users (admin only)
+      tags: [Cards]
+      operationId: listAllCards
+      summary: List cards from all authors
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Author'
+        - $ref: '#/components/parameters/Sort'
       responses:
         '200':
-          description: One page of users
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserPage'
+            $ref: '#/components/responses/CardPage'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/users/{userId}:
+            $ref: '#/components/responses/Unauthorized'
+  /api/v1/allCards/{cardId}:
     parameters:
-      - name: userId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-          example: 7
+      - $ref: '#/components/parameters/CardId'
     get:
-      tags: [Admin]
-      operationId: getUser
-      summary: View one user (admin only)
+      tags: [Cards]
+      operationId: getPublicCard
+      summary: Get any author's card
+      description: Public catalog access still requires authentication.
       responses:
         '200':
-          description: The user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
+            $ref: '#/components/responses/Card'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+            $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-    patch:
-      tags: [Admin]
-      operationId: updateUserRole
-      summary: Grant or revoke admin role (admin only)
+            $ref: '#/components/responses/NotFound'
+  /api/v1/randomCard:
+    get:
+      tags: [Cards]
+      operationId: getRandomCard
+      summary: Get a random card from the catalog
+      description: Returns 404 when no cards match. Does not add the card to inventory.
+      parameters:
+        - $ref: '#/components/parameters/Type'
+      responses:
+        '200':
+            $ref: '#/components/responses/Card'
+        '400':
+            $ref: '#/components/responses/BadRequest'
+        '401':
+            $ref: '#/components/responses/Unauthorized'
+        '404':
+            $ref: '#/components/responses/NotFound'
+  /api/v1/cards/{cardId}/stats:
+    parameters:
+      - $ref: '#/components/parameters/CardId'
+    get:
+      tags: [Cards]
+      operationId: getCardStats
+      summary: Get battle statistics across all inventory copies of a card
+      description: Any authenticated user can read stats. Existing cards without results return zeros; null inventory references cannot be attributed to a card.
+      responses:
+        '200':
+            $ref: '#/components/responses/Stats'
+        '400':
+            $ref: '#/components/responses/BadRequest'
+        '401':
+            $ref: '#/components/responses/Unauthorized'
+        '404':
+            $ref: '#/components/responses/NotFound'
+  /api/v1/auth/google:
+    post:
+      tags: [Authentication]
+      operationId: googleSignIn
+      summary: Register or sign in using a verified Google token
+      description: The Authorization bearer token supplies identity. First sign-in returns 201; later sign-ins return 200 and refresh the stored Google display name.
+      responses:
+        '200':
+            $ref: '#/components/responses/User'
+        '201':
+            $ref: '#/components/responses/UserCreated'
+        '400':
+            $ref: '#/components/responses/BadRequest'
+        '401':
+            $ref: '#/components/responses/Unauthorized'
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      operationId: getGoogleIdentity
+      summary: Get verified Google token claims
+      description: Returns token claims rather than the stored database profile.
+      responses:
+        '200':
+            $ref: '#/components/responses/GoogleIdentity'
+        '401':
+            $ref: '#/components/responses/Unauthorized'
+  /api/v1/users/me/display-name:
+    put:
+      tags: [Users]
+      operationId: updateDisplayName
+      summary: Replace the signed-in user's display name
+      description: Trims the name and rejects blank values. The next Google sign-in refreshes this value from Google.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UserPatch'
+              $ref: '#/components/schemas/DisplayNameUpdate'
       responses:
         '200':
-          description: The updated user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
+            $ref: '#/components/responses/User'
         '400':
-          $ref: '#/components/responses/BadRequest'
+            $ref: '#/components/responses/BadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+            $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-    delete:
-      tags: [Admin]
-      operationId: deleteUser
-      summary: Delete a user and their data (admin only)
+            $ref: '#/components/responses/NotFound'
+  /actuator/health:
+    get:
+      tags: [Health]
+      operationId: health
+      summary: Check service health
+      security: []
       responses:
-        '204':
-          description: Deleted successfully
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
+        '200':
+          description: Service is healthy.
+        '503':
+          description: A health check failed.
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: JWT from the OAuth2 Authorization Code + PKCE flow.
-
+      description: Google-issued ID token targeting the configured Google Web client ID.
   parameters:
+    DeckId:
+      name: deckId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int32
     CardId:
       name: cardId
       in: path
       required: true
       schema:
         type: integer
-        format: int64
-        example: 42
+        format: int32
     Page:
       name: page
       in: query
-      description: Zero-based page number
+      description: Zero-based page number. Pages beyond the end return empty content.
       schema:
         type: integer
+        format: int32
         minimum: 0
         default: 0
     Size:
       name: size
       in: query
-      description: Items per page
       schema:
         type: integer
+        format: int32
         minimum: 1
         maximum: 100
         default: 20
-
+    Type:
+      name: type
+      in: query
+      schema:
+        $ref: '#/components/schemas/CardType'
+    Author:
+      name: author
+      in: query
+      description: Filter by the author's database user ID.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    Sort:
+      name: sort
+      in: query
+      description: Equal names/types use ascending ID as a secondary sort.
+      schema:
+        type: string
+        enum: ['name,asc', 'name,desc', 'id,asc', 'id,desc', 'type,asc', 'type,desc']
+        default: 'name,asc'
   schemas:
-    CardClassName:
-      type: string
-      enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE]
-      example: WARRIOR
-
-    CardClass:
+    DeckCard:
       type: object
-      required: [id, name, strongAgainst, weakAgainst, neutralAgainst]
+      required: [id, deckId, cardId, userId, type, card]
       properties:
         id:
           type: integer
           format: int64
-          example: 1
-        name:
-          $ref: '#/components/schemas/CardClassName'
-        description:
-          type: string
-          example: Armored frontliner; counters ranged attacks but struggles against heavy brawlers.
-        strongAgainst:
-          type: array
-          items:
-            $ref: '#/components/schemas/CardClassName'
-          example: [RANGER]
-        weakAgainst:
-          type: array
-          items:
-            $ref: '#/components/schemas/CardClassName'
-          example: [BRAWLER]
-        neutralAgainst:
-          type: array
-          items:
-            $ref: '#/components/schemas/CardClassName'
-          example: [MAGE, ROGUE]
-
-    Card:
-      type: object
-      required: [id, name, cardClass, powerLevel, createdAt]
-      properties:
-        id:
+          description: Card_in_deck.id; use this as cardInDeckId for PATCH and DELETE.
+        deckId:
           type: integer
           format: int64
-          readOnly: true
-          example: 42
-        name:
+        cardId:
+          type: integer
+          format: int64
+          description: User_owns_card.id, not Card.id.
+        userId:
+          type: integer
+          format: int64
+          description: Authenticated deck owner's ID.
+        type:
           type: string
-          example: Ironclad Vanguard
-        description:
-          type: string
-          maxLength: 500
           nullable: true
-          example: Defensive powerhouse equipped with tower shield
-        cardClass:
-          $ref: '#/components/schemas/CardClassName'
-        powerLevel:
+          enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE, null]
+          description: Membership metadata; older rows may be null.
+        card:
+          type: object
+          nullable: true
+          description: Always null in this batch; the underlying card is not embedded.
+    DeckCardCreate:
+      type: object
+      required: [cardId, userId, type]
+      properties:
+        cardId:
           type: integer
+          format: int64
           minimum: 1
-          example: 85
+          maximum: 2147483647
+          description: An inventory ID owned by the signed-in user.
+        userId:
+          type: integer
+          format: int64
+          description: Must match the authenticated deck owner.
+        type:
+          $ref: '#/components/schemas/CardType'
+    DeckCardPatch:
+      type: object
+      description: Empty object is a no-op. Only type is editable; explicit null is invalid.
+      properties:
+        type:
+          $ref: '#/components/schemas/CardType'
+    Deck:
+      type: object
+      required: [id, userId, name, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        name:
+          type: string
         createdAt:
           type: string
-          format: date-time
+          nullable: true
+          description: Always null; the database has no creation timestamp column.
+    DeckCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Trimmed before validation; the trimmed name must contain 1 to 150 characters.
+    CardType:
+      type: string
+      enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE]
+    Card:
+      type: object
+      required: [id, name, imgURL, description, type, authorId]
+      properties:
+        id:
+          type: integer
+          format: int64
           readOnly: true
-          example: '2026-10-01T12:00:00Z'
-
+        name:
+          type: string
+        imgURL:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        type:
+          $ref: '#/components/schemas/CardType'
+        authorId:
+          type: integer
+          format: int64
+          readOnly: true
     CardCreate:
-      description: Body for POST and PUT. PUT replaces all fields.
       type: object
-      required: [name, cardClass, powerLevel]
+      required: [name, type]
       properties:
         name:
           type: string
-          minLength: 1
-          maxLength: 100
-          example: Ironclad Vanguard
+          description: Trimmed before validation; the trimmed name must contain 1 to 150 characters.
+        imgURL:
+          type: string
+          nullable: true
+          maxLength: 500
         description:
           type: string
-          maxLength: 500
           nullable: true
-          example: Defensive powerhouse equipped with tower shield
-        cardClass:
-          $ref: '#/components/schemas/CardClassName'
-        powerLevel:
-          type: integer
-          minimum: 1
-          maximum: 9999
-          example: 85
-
+        type:
+          $ref: '#/components/schemas/CardType'
     CardPatch:
-      description: Body for PATCH. Send only the fields to update.
       type: object
-      minProperties: 1
+      description: |
+        Every field is optional. Omitted fields remain unchanged; explicit null
+        clears imgURL or description. Null name/type is invalid. An empty object
+        is a no-op. ID/author are not editable; unknown properties are ignored.
       properties:
         name:
           type: string
-          minLength: 1
-          maxLength: 100
-          example: Ironclad Dreadnought
+          description: Trimmed before validation; the trimmed name must contain 1 to 150 characters.
+        imgURL:
+          type: string
+          nullable: true
+          maxLength: 500
         description:
           type: string
-          maxLength: 500
           nullable: true
-          example: Upgraded shield and plate armor
-        cardClass:
-          $ref: '#/components/schemas/CardClassName'
-        powerLevel:
-          type: integer
-          minimum: 1
-          maximum: 9999
-          nullable: true
-          example: 95
-
+        type:
+          $ref: '#/components/schemas/CardType'
     PageMeta:
-      description: Spring Data PagedModel shape.
       type: object
       required: [size, number, totalElements, totalPages]
       properties:
         size:
           type: integer
-          example: 20
         number:
           type: integer
-          example: 0
         totalElements:
           type: integer
           format: int64
-          example: 57
         totalPages:
           type: integer
-          example: 3
-
     CardPage:
       type: object
       required: [content, page]
@@ -495,117 +603,106 @@ components:
             $ref: '#/components/schemas/Card'
         page:
           $ref: '#/components/schemas/PageMeta'
-
+    Stats:
+      type: object
+      required: [wins, losses, totalBattles, winRate]
+      properties:
+        wins:
+          type: integer
+        losses:
+          type: integer
+        totalBattles:
+          type: integer
+          description: Battle rows involving the card; a same-card match counts once.
+        winRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Wins divided by wins plus losses, or zero with no results.
     User:
       type: object
-      required: [id, email, displayName, role]
+      required: [id, email, displayName, isAdmin]
       properties:
         id:
           type: integer
-          format: int64
-          example: 7
+          format: int32
+          nullable: true
         email:
           type: string
-          format: email
-          example: player1@csumb.edu
         displayName:
           type: string
-          example: CardDuelist42
-        role:
-          $ref: '#/components/schemas/Role'
-
-    Role:
-      type: string
-      enum: [USER, ADMIN]
-
-    UserPatch:
-      description: Body for PATCH /api/v1/users/{userId}.
+        isAdmin:
+          type: boolean
+    GoogleIdentity:
       type: object
-      required: [role]
+      required: [googleSubject, email, name]
       properties:
-        role:
-          $ref: '#/components/schemas/Role'
-
-    UserPage:
+        googleSubject:
+          type: string
+        email:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+    DisplayNameUpdate:
       type: object
-      required: [content, page]
+      required: [displayName]
       properties:
-        content:
-          type: array
-          items:
-            $ref: '#/components/schemas/User'
-        page:
-          $ref: '#/components/schemas/PageMeta'
-
-    Problem:
-      description: RFC 9457 Problem Details. This is the single error body returned by every endpoint.
-      type: object
-      required: [title, status]
-      properties:
-        type:
+        displayName:
           type: string
-          default: about:blank
-        title:
-          type: string
-          example: Not Found
-        status:
-          type: integer
-          example: 404
-        detail:
-          type: string
-          example: Card 42 not found for this user
-        instance:
-          type: string
-          example: /api/v1/cards/42
-
+          description: Trimmed and rejected if blank.
   responses:
+    Card:
+      description: The requested or updated card.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Card'
+    CardCreated:
+      description: Created card. Repeated POST requests create separate cards.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Card'
+    CardPage:
+      description: Filtered page and matching totals. Empty matches return 200.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CardPage'
+    Stats:
+      description: Battle statistics for the existing card.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Stats'
+    User:
+      description: Stored user profile.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/User'
+    UserCreated:
+      description: New Google-backed user profile.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/User'
+    GoogleIdentity:
+      description: Verified Google token claims.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GoogleIdentity'
+    Deleted:
+      description: Deleted successfully; no response body.
     BadRequest:
-      description: Validation failed or malformed JSON.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          example:
-            title: Bad Request
-            status: 400
-            detail: One or more fields failed validation.
+      description: Invalid parameters, invalid fields, or malformed JSON.
     Unauthorized:
-      description: Missing or invalid token.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          example:
-            title: Unauthorized
-            status: 401
-            detail: Authentication required.
-    Forbidden:
-      description: Valid token, but not allowed for this action (for example, not an admin).
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          example:
-            title: Forbidden
-            status: 403
-            detail: You do not have permission to perform this action.
+      description: Missing, expired, or otherwise invalid Google token.
     NotFound:
-      description: Resource does not exist or belongs to someone else.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          example:
-            title: Not Found
-            status: 404
-            detail: Card 42 not found for this user
-    InternalError:
-      description: Unexpected server error. The app still needs to show something useful.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-          example:
-            title: Internal Server Error
-            status: 500
-            detail: An unexpected error occurred. Please try again later.
+      description: Card/deck/user/inventory/entry not found, no random-card match, or the caller is not the author/owner for a private action.
+    Conflict:
+      description: A database constraint prevents the operation, or a legacy deck entry has no inventory reference.

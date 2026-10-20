@@ -66,7 +66,7 @@ test {
 ['railwayTest': 'railway', 'googleSignInTest': 'google-live'].each { taskName, tagName ->
 	tasks.register(taskName, Test) {
 		group = 'verification'
-		description = "Runs the opt-in ${tagName} integration checks. See README.md."
+        description = "Runs the opt-in ${tagName} integration checks. See src/test/README.md."
 		testClassesDirs = sourceSets.test.output.classesDirs
 		classpath = sourceSets.test.runtimeClasspath
 		useJUnitPlatform { includeTags tagName }
@@ -88,7 +88,7 @@ jacocoTestCoverageVerification {
 	violationRules {
 		rule {
 			element = 'CLASS'
-			includes = ['com.example.cardbattle.service.*']
+            includes = ['com.example.cardbattle.api.card.CardService', 'com.example.cardbattle.api.deck.DeckService']
 			limit {
 				counter = 'LINE'
 				value = 'COVEREDRATIO'
