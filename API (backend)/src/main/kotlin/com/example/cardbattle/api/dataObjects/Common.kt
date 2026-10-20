@@ -19,11 +19,6 @@ data class StatsResponse(
     val winRate: Double
 )
 
-enum class Role {
-    USER,
-    ADMIN
-}
-
 enum class CardType {
     WARRIOR,
     BRAWLER,

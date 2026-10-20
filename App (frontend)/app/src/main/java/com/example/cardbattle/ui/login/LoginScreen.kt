@@ -2,14 +2,26 @@ package com.example.cardbattle.ui.login
 
 import android.app.Activity
 import android.util.Base64
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.credentials.Credential
 import androidx.credentials.CredentialManager
@@ -17,21 +29,16 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.cardbattle.R
-import com.example.cardbattle.data.LocalAuthManager
 import com.example.cardbattle.data.remote.UserProfile
 import com.example.cardbattle.data.remote.signInAndGetUser
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import java.security.SecureRandom
-import android.util.Log
 
 @Composable
 fun LoginScreen(
-    onLoginSuccess: () -> Unit = {},
-    onNavigateToSignUp: () -> Unit = {},
     requestIdToken: (suspend () -> String)? = null,
     authenticateWithBackend: suspend (String) -> UserProfile = { signInAndGetUser(it) },
     onSignedIn: (String, UserProfile) -> Unit = { _, _ -> },
@@ -40,102 +47,30 @@ fun LoginScreen(
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
-    val authManager = remember { LocalAuthManager(context) }
-    val credentialManager = remember(context) { CredentialManager.create(context) }
-
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    val credentialManager = remember(context) {
+        CredentialManager.create(context)
+    }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+        modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
                 text = "Welcome",
                 style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
             )
+            Text("Sign in or create an account with Google.")
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = username,
-                onValueChange = {
-                    username = it
-                    message = ""
-                },
-                label = { Text("Username") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            OutlinedTextField(
-                value = password,
-                onValueChange = {
-                    password = it
-                    message = ""
-                },
-                label = { Text("Password") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            if (message.isNotEmpty()) {
-                Text(
-                    text = message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            // Normal login button
-            Button(
-                onClick = {
-                    when {
-                        username.isBlank() || password.isBlank() -> {
-                            message = "Please enter username and password"
-                        }
-                        if (idToken.isBlank()) {
-                            message = "No Google ID token received. Please try again."
-                        } else {
-                            val user = authenticateWithBackend(idToken)
-                            onSignedIn(idToken, user)
-                        }
-                    } catch (exception: GetCredentialCancellationException) {
-                        message = "Sign-in cancelled."
-                    } catch (exception: CancellationException) {
-                        throw exception
-                    } catch (exception: Exception) {
-                        Log.e("CardBattleLogin", "Sign-in failed", exception)
-                        message = "Google sign-in failed. Please try again."
-                    } finally {
-                        loading = false
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Login")
-            }
-
-            TextButton(onClick = onNavigateToSignUp) {
-                Text("Don't have an account? Create Account")
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-            // Google Sign In button
             OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
                 onClick = {
                     loading = true
@@ -154,10 +89,8 @@ fun LoginScreen(
                             if (idToken.isBlank()) {
                                 message = "No Google ID token received. Please try again."
                             } else {
-                                // Extract the first name directly from the idToken payload
-                                val googleName = extractNameFromIdToken(idToken)
-                                authManager.setActiveUser(googleName)
-                                onLoginSuccess()
+                                val user = authenticateWithBackend(idToken)
+                                onSignedIn(idToken, user)
                             }
                         } catch (exception: GetCredentialCancellationException) {
                             message = "Sign-in cancelled."
@@ -169,33 +102,21 @@ fun LoginScreen(
                             loading = false
                         }
                     }
-                },
-                modifier = Modifier.fillMaxWidth()
+                }
             ) {
                 Text(text = if (loading) "Signing in…" else "Sign in with Google")
             }
-        }
-    }
-}
-private fun extractNameFromIdToken(idToken: String): String {
-    return try {
-        val parts = idToken.split(".")
-        if (parts.size >= 2) {
-            val payloadBytes = Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING)
-            val json = JSONObject(String(payloadBytes, Charsets.UTF_8))
-            when {
-                json.has("given_name") -> json.getString("given_name")
-                json.has("name") -> json.getString("name")
-                json.has("email") -> json.getString("email").substringBefore("@")
-                else -> "Player"
+            if (message.isNotEmpty()) {
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
-        } else {
-            "Player"
         }
-    } catch (e: Exception) {
-        "Player"
     }
 }
+
 private suspend fun requestGoogleIdToken(
     activity: Activity,
     credentialManager: CredentialManager,
@@ -210,7 +131,7 @@ private suspend fun requestGoogleIdToken(
 
 internal fun googleIdToken(credential: Credential): String {
     require(credential is CustomCredential &&
-            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+        credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
         "Unexpected credential type"
     }
     return GoogleIdTokenCredential.createFrom(credential.data).idToken

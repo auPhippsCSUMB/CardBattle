@@ -2,10 +2,9 @@
 erDiagram
     User {
         INT id PK
+        VARCHAR(255) google_subject UK
         VARCHAR(255) email
         VARCHAR(100) displayName
-        VARCHAR(50) role
-        VARCHAR(255) password
         BOOLEAN isAdmin
     }
 

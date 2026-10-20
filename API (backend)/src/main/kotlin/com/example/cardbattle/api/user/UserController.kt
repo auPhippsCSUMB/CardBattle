@@ -1,6 +1,6 @@
 package com.example.cardbattle.api.user
 
-import com.example.cardbattle.api.auth.UserResponse
+import com.example.cardbattle.api.dataObjects.UserResponse
 import org.springframework.http.HttpStatus
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.web.bind.annotation.PutMapping
