@@ -1,0 +1,30 @@
+# Opt-in local database: docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cardbattle}
+      POSTGRES_USER: ${POSTGRES_USER:-cardbattle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./api-backend/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-cardbattle}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-cardbattle}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

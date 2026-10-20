@@ -67,5 +67,5 @@ class LiveConnectionTests {
     }
 
     private fun required(name: String): String = System.getenv(name)?.takeIf { it.isNotBlank() }
-        ?: error("Set $name before running this opt-in live test. See api-backend/README.md.")
+        ?: error("Set $name before running this opt-in live test. See api-backend/src/test/README.md.")
 }

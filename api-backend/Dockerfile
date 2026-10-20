@@ -1,8 +1,8 @@
-FROM gradle:8.10.2-jdk21 AS build
+FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /workspace
 
 COPY . ./
-RUN ./gradlew --no-daemon clean bootJar
+RUN bash ./gradlew --no-daemon clean bootJar
 
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app

@@ -1,0 +1,10 @@
+.env
+.env.*
+.git
+.gradle
+.kotlin
+.idea
+build
+**/build
+**/.gradle
+*.log

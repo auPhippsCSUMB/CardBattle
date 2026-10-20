@@ -206,7 +206,7 @@ A connection-refused error usually means the tunnel stopped or the local port ch
 
 Start the backend with its normal Google issuer and Web client ID configuration and a working
 database connection. Obtain a fresh ID token by signing into the Android app. Use an Android
-Studio debugger breakpoint on `onTokenReceived(idToken)` in `LoginScreen.kt` to inspect the
+Studio debugger breakpoint on `val user = authenticateWithBackend(idToken)` in `LoginScreen.kt` to inspect the
 local `idToken` variable; do not add token logging. This step requires an actual Google account
 and consent UI. Get the account's expected `sub` from the locally inspected token payload
 (decoding a payload does not verify its signature) and compare it with the API's verified result.
@@ -227,7 +227,8 @@ unset GOOGLE_ID_TOKEN GOOGLE_EXPECTED_SUBJECT
 Use HTTPS for a remote backend. The task sends missing, malformed, and real tokens to
 `/api/v1/auth/me`, expects 401/401/200, and checks the returned subject. It does not print
 the bearer token. A fresh token must target the same Web client ID as the running backend.
-The Android app currently obtains tokens; it does not yet call this API automatically.
+The Android app submits its token automatically to `POST /api/v1/auth/google`.
+The live check above separately exercises `GET /api/v1/auth/me`.
 
 The two live tasks are excluded from normal `test`/`build`, always rerun when requested,
 and fail with an explanatory message if their required environment variables are absent.
