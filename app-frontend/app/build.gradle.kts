@@ -20,6 +20,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file(
+                "${System.getProperty("user.home")}/.android/cardbattle-team-debug.keystore"
+            )
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             optimization {
