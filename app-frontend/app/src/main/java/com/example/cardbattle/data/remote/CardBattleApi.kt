@@ -103,3 +103,81 @@ suspend fun updateDisplayName(
             connection.disconnect()
         }
     }
+@Serializable
+enum class CardType(val label: String) {
+    WARRIOR("Warrior"),
+    BRAWLER("Brawler"),
+    RANGER("Ranger"),
+    MAGE("Mage"),
+    ROGUE("Rogue"),
+}
+
+@Serializable
+data class CardCreateRequest(
+    val name: String,
+    val type: CardType,
+    val imgURL: String? = null,
+    val description: String? = null,
+)
+
+@Serializable
+data class CardResponse(
+    val id: Long,
+    val name: String,
+    val imgURL: String?,
+    val description: String?,
+    val type: CardType,
+    val authorId: Long,
+)
+
+suspend fun createCard(
+    idToken: String,
+    request: CardCreateRequest,
+    backendUrl: String = DEFAULT_BACKEND_URL,
+): CardResponse {
+    val cleanRequest = request.copy(name = request.name.trim())
+
+    require(cleanRequest.name.length in 1..150) {
+        "Card name must contain 1–150 characters."
+    }
+    require((cleanRequest.imgURL?.length ?: 0) <= 500) {
+        "Image URL must not exceed 500 characters."
+    }
+
+    return withContext(Dispatchers.IO) {
+        val connection = URL("$backendUrl/api/v1/cards")
+            .openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.setRequestProperty(
+                "Authorization",
+                "Bearer $idToken",
+            )
+            connection.setRequestProperty(
+                "Content-Type",
+                "application/json; charset=UTF-8",
+            )
+
+            val body = Json.encodeToString(cleanRequest)
+            connection.outputStream.use {
+                it.write(body.toByteArray(Charsets.UTF_8))
+            }
+
+            if (connection.responseCode != 201) {
+                throw BackendHttpException(connection.responseCode)
+            }
+
+            val response = connection.inputStream
+                .bufferedReader()
+                .use { it.readText() }
+
+            Json.decodeFromString<CardResponse>(response)
+        } finally {
+            connection.disconnect()
+        }
+    }
+}

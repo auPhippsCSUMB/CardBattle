@@ -16,18 +16,23 @@ import com.example.cardbattle.ui.home.HomeScreen
 import com.example.cardbattle.ui.login.LoginScreen
 import kotlinx.serialization.Serializable
 import com.example.cardbattle.data.remote.updateDisplayName
+import com.example.cardbattle.ui.cards.CreateCardScreen
+import androidx.compose.ui.platform.LocalContext
+import com.example.cardbattle.data.local.LocalCardStore
 
 @Serializable
 data object LoginRoute
 
 @Serializable
 data object HomeRoute
-
+@Serializable
+data object CreateCardRoute
 @Composable
 fun AppNavHost(modifier: Modifier = Modifier) {
     val navController = rememberNavController()
     val authSession = remember { AuthSession() }
     var currentUser by remember { mutableStateOf<UserProfile?>(null) }
+    val context = LocalContext.current.applicationContext
 
     NavHost(
         navController = navController,
@@ -43,6 +48,28 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                         popUpTo<LoginRoute> { inclusive = true }
                     }
                 }
+            )
+        }
+        composable<CreateCardRoute> {
+            val userId = currentUser?.id
+
+            CreateCardScreen(
+                onBack = { navController.popBackStack() },
+                onSaveLocal = { id, name, type, pngBytes ->
+                    val signedInUserId = checkNotNull(userId) {
+                        "Sign in before saving cards."
+                    }
+
+                    LocalCardStore(
+                        context = context,
+                        userId = signedInUserId,
+                    ).save(
+                        id = id,
+                        name = name,
+                        type = type,
+                        pngBytes = pngBytes,
+                    )
+                },
             )
         }
 
@@ -63,6 +90,11 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                         } else {
                             throw error
                         }
+                    }
+                },
+                onNavigateToNewCards = {
+                    navController.navigate(CreateCardRoute) {
+                        launchSingleTop = true
                     }
                 },
                 onLogout = {
