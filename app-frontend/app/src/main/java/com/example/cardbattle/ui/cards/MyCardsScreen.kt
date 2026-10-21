@@ -35,6 +35,8 @@ import kotlinx.coroutines.withContext
 fun MyCardsScreen(
     onBack: () -> Unit,
     loadCards: suspend () -> List<LocalCard>,
+    onEditCard: (LocalCard) -> Unit,
+    onDeleteCard: suspend (String) -> Unit,
 ) {
     var cards by remember { mutableStateOf<List<LocalCard>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -42,9 +44,14 @@ fun MyCardsScreen(
     var selectedCard by remember { mutableStateOf<LocalCard?>(null) }
     var reload by remember { mutableStateOf(0) }
 
+
     val currentLoader by rememberUpdatedState(loadCards)
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    var deleteTarget by remember { mutableStateOf<LocalCard?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(reload) {
         loading = true
@@ -268,12 +275,100 @@ fun MyCardsScreen(
             },
             confirmButton = {
                 TextButton(
-                    onClick = { selectedCard = null },
+                    onClick = {
+                        onEditCard(card)
+                        selectedCard = null
+                    },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = Color.White
                     ),
                 ) {
-                    Text("Close")
+                    Text("Edit")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            selectedCard = null
+                            deleteTarget = card
+                            deleteError = null
+                        },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = Color.White
+                        ),
+                    ) {
+                        Text("Delete")
+                    }
+                }
+            },
+        )
+    }
+    deleteTarget?.let { card ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!deleting) deleteTarget = null
+            },
+            title = { Text("Delete card?") },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "\"${card.name}\" will be deleted from this device. " +
+                                "This cannot be undone."
+                    )
+
+                    deleteError?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !deleting,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    onClick = {
+                        if (!deleting) {
+                            deleting = true
+                            deleteError = null
+
+                            scope.launch {
+                                try {
+                                    onDeleteCard(card.id)
+                                    cards = cards.filterNot {
+                                        it.id == card.id
+                                    }
+                                    deleteTarget = null
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    deleteError =
+                                        "Could not delete the card. Try again."
+                                } finally {
+                                    deleting = false
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    Text(if (deleting) "Deleting…" else "Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !deleting,
+                    onClick = {
+                        deleteTarget = null
+                        selectedCard = card
+                    },
+                ) {
+                    Text("Cancel")
                 }
             },
         )

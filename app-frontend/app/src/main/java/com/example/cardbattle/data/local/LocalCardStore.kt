@@ -103,6 +103,25 @@ class LocalCardStore(
             }
         }
     }
+    suspend fun delete(id: String) {
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val updated = readCards().filterNot { it.id == id }
+                val bytes = json.encodeToString(updated)
+                    .toByteArray(Charsets.UTF_8)
+
+                val output = file.startWrite()
+
+                try {
+                    output.write(bytes)
+                    file.finishWrite(output)
+                } catch (error: Throwable) {
+                    file.failWrite(output)
+                    throw error
+                }
+            }
+        }
+    }
 
     private fun readCards(): List<LocalCard> {
         val input = try {

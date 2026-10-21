@@ -1,20 +1,20 @@
 package com.example.cardbattle.ui.nav
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalActivity
+import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import com.example.cardbattle.data.auth.AuthSession
 import com.example.cardbattle.data.local.LocalCardStore
 import com.example.cardbattle.data.remote.BackendHttpException
 import com.example.cardbattle.data.remote.UserProfile
 import com.example.cardbattle.data.remote.updateDisplayName
+import com.example.cardbattle.ui.cards.CardDraftsViewModel
 import com.example.cardbattle.ui.cards.CreateCardScreen
 import com.example.cardbattle.ui.cards.MyCardsScreen
 import com.example.cardbattle.ui.home.HomeScreen
@@ -33,17 +33,45 @@ data object CreateCardRoute
 @Serializable
 data object MyCardsRoute
 
+@Serializable
+data class EditCardRoute(val cardId: String)
+
 @Composable
 fun AppNavHost(modifier: Modifier = Modifier) {
     val navController = rememberNavController()
     val authSession = remember { AuthSession() }
     var currentUser by remember { mutableStateOf<UserProfile?>(null) }
 
-    val context = LocalContext.current.applicationContext
+    val activity = checkNotNull(
+        LocalActivity.current as? ComponentActivity
+    ) {
+        "AppNavHost requires a ComponentActivity."
+    }
+    val context = activity.applicationContext
+
+    val drafts = remember(activity) {
+        ViewModelProvider(activity)[CardDraftsViewModel::class.java]
+    }
+
+    fun store(): LocalCardStore {
+        val userId = checkNotNull(currentUser?.id) {
+            "Sign in to access your cards."
+        }
+
+        return LocalCardStore(context, userId)
+    }
+
+    fun returnHome() {
+        navController.navigate(HomeRoute) {
+            popUpTo<HomeRoute> { inclusive = false }
+            launchSingleTop = true
+        }
+    }
 
     fun logOut() {
         authSession.clear()
         currentUser = null
+        drafts.clear()
 
         navController.navigate(LoginRoute) {
             popUpTo<HomeRoute> { inclusive = true }
@@ -61,6 +89,7 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                 onSignedIn = { idToken, user ->
                     authSession.save(idToken)
                     currentUser = user
+                    drafts.selectUser(user.id)
 
                     navController.navigate(HomeRoute) {
                         popUpTo<LoginRoute> { inclusive = true }
@@ -81,10 +110,7 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                     try {
                         currentUser = updateDisplayName(token, newName)
                     } catch (error: BackendHttpException) {
-                        if (error.statusCode == 401) {
-                            logOut()
-                        }
-
+                        if (error.statusCode == 401) logOut()
                         throw error
                     }
                 },
@@ -106,52 +132,74 @@ fun AppNavHost(modifier: Modifier = Modifier) {
         }
 
         composable<CreateCardRoute> {
-            val userId = currentUser?.id
+            // Capture this draft so saving resets only the completed draft.
+            val draft = drafts.newDraft
 
             CreateCardScreen(
+                draft = draft,
                 onBack = { navController.popBackStack() },
 
                 onSaveLocal = { id, name, type, pngBytes ->
-                    val signedInUserId = checkNotNull(userId) {
-                        "Sign in before saving cards."
-                    }
-
-                    LocalCardStore(
-                        context = context,
-                        userId = signedInUserId,
-                    ).save(
+                    store().save(
                         id = id,
                         name = name,
                         type = type,
                         pngBytes = pngBytes,
                     )
 
-                    // Return only after the card has been saved.
-                    navController.navigate(HomeRoute) {
-                        popUpTo<HomeRoute> { inclusive = false }
-                        launchSingleTop = true
-                    }
+                    returnHome()
+                    drafts.finishNewCard()
                 },
             )
         }
 
         composable<MyCardsRoute> {
-            val userId = currentUser?.id
-
             MyCardsScreen(
                 onBack = { navController.popBackStack() },
 
-                loadCards = {
-                    val signedInUserId = checkNotNull(userId) {
-                        "Sign in to view your cards."
-                    }
+                loadCards = { store().load() },
 
-                    LocalCardStore(
-                        context = context,
-                        userId = signedInUserId,
-                    ).load()
+                onEditCard = { card ->
+                    drafts.openEdit(card)
+
+                    navController.navigate(EditCardRoute(card.id)) {
+                        launchSingleTop = true
+                    }
+                },
+
+                onDeleteCard = { id ->
+                    store().delete(id)
+                    drafts.editDrafts.remove(id)
                 },
             )
+        }
+
+        composable<EditCardRoute> { entry ->
+            val route = entry.toRoute<EditCardRoute>()
+            val draft = drafts.editDrafts[route.cardId]
+
+            if (draft == null) {
+                LaunchedEffect(route.cardId) {
+                    navController.popBackStack()
+                }
+            } else {
+                CreateCardScreen(
+                    draft = draft,
+                    onBack = { navController.popBackStack() },
+
+                    onSaveLocal = { id, name, type, pngBytes ->
+                        store().save(
+                            id = id,
+                            name = name,
+                            type = type,
+                            pngBytes = pngBytes,
+                        )
+
+                        returnHome()
+                        drafts.editDrafts.remove(id)
+                    },
+                )
+            }
         }
     }
 }

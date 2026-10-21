@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint
+import android.graphics.Rect
+import android.util.Base64
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -17,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,7 +32,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import com.example.cardbattle.data.local.LocalCard
 import com.example.cardbattle.data.remote.CardType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -39,19 +43,75 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import kotlin.math.roundToInt
 
-private data class ArtStroke(
+data class EditorStroke(
     val color: Color,
     val points: List<Offset>,
 )
 
-private data class BrushColor(
-    val label: String,
-    val color: Color,
-)
+class CardEditorDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val isEditing: Boolean = false,
+) {
+    val started = mutableStateOf(isEditing)
+    val name = mutableStateOf("")
+    val selectedType = mutableStateOf<CardType?>(null)
+    val brushColor = mutableStateOf(Color.Black)
+    val basePng = mutableStateOf<ByteArray?>(null)
+    val strokes = mutableStateListOf<EditorStroke>()
+
+    companion object {
+        fun fromCard(card: LocalCard): CardEditorDraft =
+            CardEditorDraft(
+                id = card.id,
+                isEditing = true,
+            ).apply {
+                name.value = card.name
+                selectedType.value = card.type
+                basePng.value = Base64.decode(
+                    card.pngBase64,
+                    Base64.DEFAULT,
+                )
+            }
+    }
+}
+
+class CardDraftsViewModel : ViewModel() {
+    var newDraft by mutableStateOf(CardEditorDraft())
+        private set
+
+    val editDrafts = mutableStateMapOf<String, CardEditorDraft>()
+
+    private var ownerId: Int? = null
+
+    fun selectUser(userId: Int?) {
+        if (ownerId != userId) {
+            clear()
+            ownerId = userId
+        }
+    }
+
+    fun openEdit(card: LocalCard) {
+        editDrafts.getOrPut(card.id) {
+            CardEditorDraft.fromCard(card)
+        }
+    }
+
+    fun finishNewCard() {
+        newDraft = CardEditorDraft()
+    }
+
+    fun clear() {
+        newDraft = CardEditorDraft()
+        editDrafts.clear()
+        ownerId = null
+    }
+}
 
 @Composable
 fun CreateCardScreen(
+    draft: CardEditorDraft,
     onBack: () -> Unit,
     onSaveLocal: suspend (
         id: String,
@@ -60,24 +120,25 @@ fun CreateCardScreen(
         pngBytes: ByteArray,
     ) -> Unit,
 ) {
-    var started by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf<CardType?>(null) }
-    var classMenuOpen by remember { mutableStateOf(false) }
-    var selectedColor by remember { mutableStateOf(Color.Black) }
+    var started by draft.started
+    var name by draft.name
+    var selectedType by draft.selectedType
+    var brushColor by draft.brushColor
+    var basePng by draft.basePng
+    val strokes = draft.strokes
 
-    val strokes = remember { mutableStateListOf<ArtStroke>() }
     val scope = rememberCoroutineScope()
-    val draftId = remember { UUID.randomUUID().toString() }
-
-    var exporting by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
+    var classMenuOpen by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
     var previewPng by remember { mutableStateOf<ByteArray?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var saveError by remember { mutableStateOf<String?>(null) }
-    var successMessage by remember { mutableStateOf<String?>(null) }
 
-    val busy = exporting || saving
+    val baseImage = remember(basePng) {
+        basePng?.let {
+            BitmapFactory.decodeByteArray(it, 0, it.size)
+                ?.asImageBitmap()
+        }
+    }
 
     val cardColor = when (selectedType) {
         CardType.WARRIOR -> Color(0xFF963D45)
@@ -94,24 +155,22 @@ fun CreateCardScreen(
         Color.White
     }
 
-    val palette = remember {
-        listOf(
-            BrushColor("Black", Color.Black),
-            BrushColor("Red", Color(0xFFD32F2F)),
-            BrushColor("Blue", Color(0xFF1976D2)),
-            BrushColor("Green", Color(0xFF388E3C)),
-            BrushColor("Yellow", Color(0xFFFBC02D)),
-            BrushColor("White", Color.White),
-        )
-    }
+    val palette = listOf(
+        "Black" to Color.Black,
+        "Red" to Color(0xFFD32F2F),
+        "Blue" to Color(0xFF1976D2),
+        "Green" to Color(0xFF388E3C),
+        "Yellow" to Color(0xFFFBC02D),
+        "White" to Color.White,
+    )
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
-    ) { innerPadding ->
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(padding)
                 .imePadding()
                 .padding(horizontal = 20.dp),
         ) {
@@ -127,9 +186,12 @@ fun CreateCardScreen(
                 ) {
                     Text("Back")
                 }
-
                 Text(
-                    text = "Create a card",
+                    text = if (draft.isEditing) {
+                        "Edit card"
+                    } else {
+                        "Create a card"
+                    },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(start = 8.dp),
@@ -157,11 +219,10 @@ fun CreateCardScreen(
                             shape = CircleShape,
                         ) {
                             Text(
-                                text = "+",
+                                "+",
                                 style = MaterialTheme.typography.displayMedium,
                             )
                         }
-
                         Text("Make something worth battling with.")
                     }
                 }
@@ -191,14 +252,12 @@ fun CreateCardScreen(
                             OutlinedTextField(
                                 value = name,
                                 onValueChange = {
-                                    if (it.length <= 150) {
-                                        name = it
-                                        successMessage = null
-                                    }
+                                    if (it.length <= 150) name = it
                                 },
                                 enabled = !busy,
                                 label = { Text("Card name") },
                                 singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.titleLarge
                                     .copy(
                                         fontWeight = FontWeight.Bold,
@@ -214,19 +273,113 @@ fun CreateCardScreen(
                                         cardTextColor.copy(alpha = 0.6f),
                                     cursorColor = cardTextColor,
                                 ),
-                                modifier = Modifier.fillMaxWidth(),
                             )
 
-                            DrawingPad(
-                                strokes = strokes,
-                                color = selectedColor,
-                                enabled = !busy,
-                                onDrawingChanged = {
-                                    successMessage = null
-                                },
-                            )
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White)
+                                    .border(
+                                        1.dp,
+                                        Color.Gray,
+                                        RoundedCornerShape(12.dp),
+                                    )
+                                    .semantics {
+                                        contentDescription =
+                                            "Card art drawing area"
+                                    }
+                                    .pointerInput(draft, brushColor, busy) {
+                                        if (!busy) {
+                                            awaitEachGesture {
+                                                val down = awaitFirstDown(
+                                                    requireUnconsumed = false
+                                                )
+                                                down.consume()
 
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                                                fun normalize(p: Offset) =
+                                                    Offset(
+                                                        (p.x / size.width
+                                                            .coerceAtLeast(1))
+                                                            .coerceIn(0f, 1f),
+                                                        (p.y / size.height
+                                                            .coerceAtLeast(1))
+                                                            .coerceIn(0f, 1f),
+                                                    )
+
+                                                var stroke = EditorStroke(
+                                                    brushColor,
+                                                    listOf(
+                                                        normalize(down.position)
+                                                    ),
+                                                )
+                                                strokes.add(stroke)
+                                                val index = strokes.lastIndex
+
+                                                do {
+                                                    val event =
+                                                        awaitPointerEvent()
+                                                    val change =
+                                                        event.changes
+                                                            .firstOrNull {
+                                                                it.id == down.id
+                                                            } ?: break
+
+                                                    stroke = stroke.copy(
+                                                        points = stroke.points +
+                                                                normalize(
+                                                                    change.position
+                                                                )
+                                                    )
+                                                    strokes[index] = stroke
+                                                    change.consume()
+                                                } while (change.pressed)
+                                            }
+                                        }
+                                    },
+                            ) {
+                                baseImage?.let {
+                                    drawImage(
+                                        image = it,
+                                        dstSize = IntSize(
+                                            size.width.roundToInt(),
+                                            size.height.roundToInt(),
+                                        ),
+                                    )
+                                }
+
+                                val width = size.minDimension * 0.012f
+
+                                strokes.forEach { stroke ->
+                                    val points = stroke.points.map {
+                                        Offset(
+                                            it.x * size.width,
+                                            it.y * size.height,
+                                        )
+                                    }
+
+                                    points.firstOrNull()?.let {
+                                        drawCircle(
+                                            stroke.color,
+                                            width / 2,
+                                            it,
+                                        )
+                                    }
+
+                                    points.zipWithNext().forEach { (a, b) ->
+                                        drawLine(
+                                            color = stroke.color,
+                                            start = a,
+                                            end = b,
+                                            strokeWidth = width,
+                                            cap = StrokeCap.Round,
+                                        )
+                                    }
+                                }
+                            }
+
+                            Box {
                                 TextButton(
                                     onClick = { classMenuOpen = true },
                                     enabled = !busy,
@@ -240,20 +393,17 @@ fun CreateCardScreen(
                                     Column(
                                         horizontalAlignment =
                                             Alignment.CenterHorizontally,
-                                        verticalArrangement =
-                                            Arrangement.spacedBy(4.dp),
                                     ) {
                                         Text(
-                                            text = selectedType?.label
+                                            selectedType?.label
                                                 ?: "Choose a class",
                                             style = MaterialTheme.typography
                                                 .headlineMedium,
                                             fontWeight = FontWeight.Bold,
                                             textAlign = TextAlign.Center,
                                         )
-
                                         Text(
-                                            text = "Tap to change ▾",
+                                            "Tap to change ▾",
                                             style = MaterialTheme.typography
                                                 .bodySmall,
                                         )
@@ -272,7 +422,6 @@ fun CreateCardScreen(
                                             onClick = {
                                                 selectedType = type
                                                 classMenuOpen = false
-                                                successMessage = null
                                             },
                                         )
                                     }
@@ -282,7 +431,7 @@ fun CreateCardScreen(
                     }
 
                     Text(
-                        text = "Draw directly on the white art area",
+                        "Draw directly on the white art area",
                         style = MaterialTheme.typography.bodySmall,
                     )
 
@@ -292,30 +441,25 @@ fun CreateCardScreen(
                             .fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
-                        palette.forEach { brush ->
+                        palette.forEach { (label, color) ->
                             Surface(
-                                onClick = { selectedColor = brush.color },
+                                onClick = { brushColor = color },
                                 enabled = !busy,
                                 shape = CircleShape,
-                                color = brush.color,
+                                color = color,
                                 modifier = Modifier
                                     .size(40.dp)
                                     .semantics {
-                                        contentDescription =
-                                            "${brush.label} brush"
+                                        contentDescription = "$label brush"
                                     }
                                     .border(
-                                        width = if (
-                                            selectedColor == brush.color
-                                        ) 3.dp else 1.dp,
-                                        color = if (
-                                            selectedColor == brush.color
-                                        ) {
+                                        if (brushColor == color) 3.dp else 1.dp,
+                                        if (brushColor == color) {
                                             MaterialTheme.colorScheme.primary
                                         } else {
                                             Color.Gray
                                         },
-                                        shape = CircleShape,
+                                        CircleShape,
                                     ),
                             ) {}
                         }
@@ -328,17 +472,17 @@ fun CreateCardScreen(
                             enabled = strokes.isNotEmpty() && !busy,
                             onClick = {
                                 strokes.removeAt(strokes.lastIndex)
-                                successMessage = null
                             },
                         ) {
                             Text("Undo")
                         }
 
                         TextButton(
-                            enabled = strokes.isNotEmpty() && !busy,
+                            enabled = !busy &&
+                                    (strokes.isNotEmpty() || basePng != null),
                             onClick = {
                                 strokes.clear()
-                                successMessage = null
+                                basePng = null
                             },
                         ) {
                             Text("Clear art")
@@ -347,54 +491,43 @@ fun CreateCardScreen(
 
                     errorMessage?.let {
                         Text(
-                            text = it,
+                            it,
                             color = MaterialTheme.colorScheme.error,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-
-                    successMessage?.let {
-                        Text(
-                            text = it,
-                            color = MaterialTheme.colorScheme.primary,
                             textAlign = TextAlign.Center,
                         )
                     }
 
                     Button(
                         enabled = name.isNotBlank() &&
-                                selectedType != null &&
-                                !busy,
+                                selectedType != null && !busy,
                         modifier = Modifier
                             .widthIn(max = 420.dp)
                             .fillMaxWidth(),
                         onClick = {
                             val drawing = strokes.toList()
-                            exporting = true
+                            val background = basePng
+                            busy = true
                             errorMessage = null
-                            saveError = null
 
                             scope.launch {
                                 try {
                                     previewPng = withContext(
                                         Dispatchers.Default
                                     ) {
-                                        exportDrawing(drawing)
+                                        exportDrawing(drawing, background)
                                     }
                                 } catch (error: CancellationException) {
                                     throw error
                                 } catch (error: Exception) {
                                     errorMessage =
-                                        "Could not prepare the preview. Try again."
+                                        "Could not prepare the preview."
                                 } finally {
-                                    exporting = false
+                                    busy = false
                                 }
                             }
                         },
                     ) {
-                        Text(
-                            if (exporting) "Preparing…" else "Preview card"
-                        )
+                        Text(if (busy) "Preparing…" else "Preview card")
                     }
 
                     Spacer(Modifier.height(12.dp))
@@ -411,9 +544,9 @@ fun CreateCardScreen(
 
         AlertDialog(
             onDismissRequest = {
-                if (!saving) {
+                if (!busy) {
                     previewPng = null
-                    saveError = null
+                    errorMessage = null
                 }
             },
             containerColor = cardColor,
@@ -421,7 +554,7 @@ fun CreateCardScreen(
             textContentColor = cardTextColor,
             title = {
                 Text(
-                    text = name.trim(),
+                    name.trim(),
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     fontWeight = FontWeight.Bold,
@@ -442,73 +575,64 @@ fun CreateCardScreen(
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(12.dp)),
                     )
-
                     Text(
-                        text = selectedType?.label.orEmpty(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
+                        selectedType?.label.orEmpty(),
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                     )
-
-                    saveError?.let {
-                        Text(
-                            text = it,
-                            color = cardTextColor,
-                            textAlign = TextAlign.Center,
-                        )
+                    errorMessage?.let {
+                        Text(it, textAlign = TextAlign.Center)
                     }
                 }
             },
             confirmButton = {
                 TextButton(
-                    enabled = !saving,
+                    enabled = !busy,
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = cardTextColor
                     ),
                     onClick = {
-                        if (!saving) {
+                        if (!busy) {
                             val type = checkNotNull(selectedType)
                             val cardName = name.trim()
-
-                            saving = true
-                            saveError = null
+                            busy = true
+                            errorMessage = null
 
                             scope.launch {
                                 try {
                                     onSaveLocal(
-                                        draftId,
+                                        draft.id,
                                         cardName,
                                         type,
                                         png,
                                     )
-
                                     previewPng = null
-                                    successMessage =
-                                        "Card saved on this device!"
                                 } catch (error: CancellationException) {
                                     throw error
                                 } catch (error: Exception) {
-                                    saveError =
-                                        "Could not save the card. Please try again."
+                                    errorMessage =
+                                        "Could not save. Please try again."
                                 } finally {
-                                    saving = false
+                                    busy = false
                                 }
                             }
                         }
                     },
                 ) {
-                    Text(if (saving) "Saving…" else "Save locally")
+                    Text(
+                        if (busy) "Saving…"
+                        else if (draft.isEditing) "Save changes"
+                        else "Save locally"
+                    )
                 }
             },
             dismissButton = {
                 TextButton(
-                    enabled = !saving,
+                    enabled = !busy,
                     onClick = {
                         previewPng = null
-                        saveError = null
+                        errorMessage = null
                     },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = cardTextColor
@@ -521,96 +645,10 @@ fun CreateCardScreen(
     }
 }
 
-@Composable
-private fun DrawingPad(
-    strokes: SnapshotStateList<ArtStroke>,
-    color: Color,
-    enabled: Boolean,
-    onDrawingChanged: () -> Unit,
-) {
-    val notifyDrawingChanged by rememberUpdatedState(onDrawingChanged)
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White)
-            .border(1.dp, Color.Gray, RoundedCornerShape(12.dp))
-            .semantics {
-                contentDescription = "Card art drawing area"
-            }
-            .pointerInput(color, enabled) {
-                if (enabled) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(
-                            requireUnconsumed = false
-                        )
-                        down.consume()
-                        notifyDrawingChanged()
-
-                        fun normalize(position: Offset) = Offset(
-                            (position.x / size.width.coerceAtLeast(1))
-                                .coerceIn(0f, 1f),
-                            (position.y / size.height.coerceAtLeast(1))
-                                .coerceIn(0f, 1f),
-                        )
-
-                        var stroke = ArtStroke(
-                            color = color,
-                            points = listOf(normalize(down.position)),
-                        )
-
-                        strokes.add(stroke)
-                        val index = strokes.lastIndex
-
-                        do {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull {
-                                it.id == down.id
-                            } ?: break
-
-                            stroke = stroke.copy(
-                                points = stroke.points +
-                                        normalize(change.position)
-                            )
-
-                            strokes[index] = stroke
-                            change.consume()
-                        } while (change.pressed)
-                    }
-                }
-            },
-    ) {
-        val brushWidth = size.minDimension * 0.012f
-
-        strokes.forEach { stroke ->
-            val points = stroke.points.map {
-                Offset(it.x * size.width, it.y * size.height)
-            }
-
-            points.firstOrNull()?.let {
-                drawCircle(
-                    color = stroke.color,
-                    radius = brushWidth / 2,
-                    center = it,
-                )
-            }
-
-            points.zipWithNext().forEach { (start, end) ->
-                drawLine(
-                    color = stroke.color,
-                    start = start,
-                    end = end,
-                    strokeWidth = brushWidth,
-                    cap = StrokeCap.Round,
-                )
-            }
-        }
-    }
-}
-
-private fun exportDrawing(strokes: List<ArtStroke>): ByteArray {
+private fun exportDrawing(
+    strokes: List<EditorStroke>,
+    basePng: ByteArray?,
+): ByteArray {
     val side = 512
     val bitmap = Bitmap.createBitmap(
         side,
@@ -628,6 +666,25 @@ private fun exportDrawing(strokes: List<ArtStroke>): ByteArray {
             strokeJoin = Paint.Join.ROUND
         }
 
+        basePng?.let {
+            val background = requireNotNull(
+                BitmapFactory.decodeByteArray(it, 0, it.size)
+            ) {
+                "Saved artwork could not be read."
+            }
+
+            try {
+                canvas.drawBitmap(
+                    background,
+                    null,
+                    Rect(0, 0, side, side),
+                    paint,
+                )
+            } finally {
+                background.recycle()
+            }
+        }
+
         strokes.forEach { stroke ->
             paint.color = stroke.color.toArgb()
 
@@ -640,20 +697,20 @@ private fun exportDrawing(strokes: List<ArtStroke>): ByteArray {
                 )
             }
 
-            stroke.points.zipWithNext().forEach { (start, end) ->
+            stroke.points.zipWithNext().forEach { (a, b) ->
                 canvas.drawLine(
-                    start.x * side,
-                    start.y * side,
-                    end.x * side,
-                    end.y * side,
+                    a.x * side,
+                    a.y * side,
+                    b.x * side,
+                    b.y * side,
                     paint,
                 )
             }
         }
 
-        return ByteArrayOutputStream().use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-            output.toByteArray()
+        return ByteArrayOutputStream().use {
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+            it.toByteArray()
         }
     } finally {
         bitmap.recycle()
