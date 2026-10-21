@@ -30,6 +30,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.cardbattle.data.local.LocalDeck
 
 @Composable
 fun MyCardsScreen(
@@ -37,6 +38,9 @@ fun MyCardsScreen(
     loadCards: suspend () -> List<LocalCard>,
     onEditCard: (LocalCard) -> Unit,
     onDeleteCard: suspend (String) -> Unit,
+    loadDecks: suspend () -> List<LocalDeck>,
+    onSaveDeck: suspend (LocalDeck) -> Unit,
+    onDeleteDeck: suspend (Int) -> Unit,
 ) {
     var cards by remember { mutableStateOf<List<LocalCard>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -52,6 +56,7 @@ fun MyCardsScreen(
     var deleteTarget by remember { mutableStateOf<LocalCard?>(null) }
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
+    val deckEditor = remember { DeckEditorState() }
 
     LaunchedEffect(reload) {
         loading = true
@@ -99,7 +104,16 @@ fun MyCardsScreen(
                     .padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onBack) {
+                TextButton(
+                    enabled = !deckEditor.busy,
+                    onClick = {
+                        if (deckEditor.isOpen) {
+                            deckEditor.close()
+                        } else {
+                            onBack()
+                        }
+                    },
+                ) {
                     Text("Back")
                 }
 
@@ -115,28 +129,12 @@ fun MyCardsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                DeckSlot(
-                    title = "Starter Deck",
-                    subtitle = "Coming soon",
-                    starter = true,
-                    modifier = Modifier.weight(1f),
-                    onClick = { showDeckMessage(true) },
-                )
-
-                DeckSlot(
-                    title = "New deck",
-                    subtitle = "Empty",
-                    starter = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = { showDeckMessage(false) },
-                )
-
-                DeckSlot(
-                    title = "New deck",
-                    subtitle = "Empty",
-                    starter = false,
-                    modifier = Modifier.weight(1f),
-                    onClick = { showDeckMessage(false) },
+                DeckSection(
+                    cards = cards,
+                    editor = deckEditor,
+                    loadDecks = loadDecks,
+                    onSaveDeck = onSaveDeck,
+                    onDeleteDeck = onDeleteDeck,
                 )
             }
 
@@ -225,10 +223,23 @@ fun MyCardsScreen(
                             items = cards,
                             key = { it.id },
                         ) { card ->
-                            CollectionCard(
-                                card = card,
-                                onClick = { selectedCard = card },
-                            )
+                            Box(
+                                modifier = Modifier.deckCardGestures(
+                                    cardId = card.id,
+                                    editor = deckEditor,
+                                ),
+                            ) {
+                                CollectionCard(
+                                    card = card,
+                                    onClick = {
+                                        if (deckEditor.isOpen) {
+                                            deckEditor.addCard(card.id)
+                                        } else {
+                                            selectedCard = card
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -348,8 +359,8 @@ fun MyCardsScreen(
                                 } catch (error: CancellationException) {
                                     throw error
                                 } catch (error: Exception) {
-                                    deleteError =
-                                        "Could not delete the card. Try again."
+                                    deleteError = error.message
+                                        ?: "Could not delete the card. Try again."
                                 } finally {
                                     deleting = false
                                 }
@@ -429,7 +440,7 @@ private fun DeckSlot(
 }
 
 @Composable
-private fun CollectionCard(
+internal fun CollectionCard(
     card: LocalCard,
     onClick: () -> Unit,
 ) {

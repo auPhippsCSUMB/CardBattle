@@ -20,6 +20,7 @@ import com.example.cardbattle.ui.cards.MyCardsScreen
 import com.example.cardbattle.ui.home.HomeScreen
 import com.example.cardbattle.ui.login.LoginScreen
 import kotlinx.serialization.Serializable
+import com.example.cardbattle.data.local.LocalDeckStore
 
 @Serializable
 data object LoginRoute
@@ -59,6 +60,13 @@ fun AppNavHost(modifier: Modifier = Modifier) {
         }
 
         return LocalCardStore(context, userId)
+    }
+    fun deckStore(): LocalDeckStore {
+        val userId = checkNotNull(currentUser?.id) {
+            "Sign in to access your decks."
+        }
+
+        return LocalDeckStore(context, userId)
     }
 
     fun returnHome() {
@@ -168,8 +176,26 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                 },
 
                 onDeleteCard = { id ->
+                    val usedInDeck = deckStore().load().any {
+                        id in it.cardIds
+                    }
+
+                    check(!usedInDeck) {
+                        "Replace this card in its decks before deleting it."
+                    }
+
                     store().delete(id)
                     drafts.editDrafts.remove(id)
+                },
+
+                loadDecks = { deckStore().load() },
+
+                onSaveDeck = { deck ->
+                    deckStore().save(deck)
+                },
+
+                onDeleteDeck = { slot ->
+                    deckStore().delete(slot)
                 },
             )
         }
