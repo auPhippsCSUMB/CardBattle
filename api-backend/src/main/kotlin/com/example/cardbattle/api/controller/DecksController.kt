@@ -31,9 +31,10 @@ class DecksController(
     fun listDecks(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
-        @RequestParam(required = false) userId: Long?,
-        @RequestParam(required = false, defaultValue = "name,asc") sort: String
-    ): PageResponse<DeckResponse> = TODO("Implement GET /api/v1/decks")
+        @RequestParam(required = false) userId: Int?,
+        @RequestParam(required = false, defaultValue = "name,asc") sort: String,
+        authentication: JwtAuthenticationToken,
+    ): PageResponse<DeckResponse> = deckService.listDecks(authentication.token.subject, page, size, userId, sort)
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -50,9 +51,10 @@ class DecksController(
 
     @PatchMapping("/{deckId}")
     fun updateDeck(
-        @PathVariable deckId: Long,
-        @RequestBody request: DeckPatchRequest
-    ): DeckResponse = TODO("Implement PATCH /api/v1/decks/{deckId}")
+        @PathVariable deckId: Int,
+        @RequestBody request: DeckPatchRequest,
+        authentication: JwtAuthenticationToken,
+    ): DeckResponse = deckService.updateDeck(deckId, request, authentication.token.subject)
 
     @DeleteMapping("/{deckId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -64,7 +66,10 @@ class DecksController(
     }
 
     @GetMapping("/{deckId}/cards")
-    fun listDeckCards(@PathVariable deckId: Long): List<DeckCardResponse> = TODO("Implement GET /api/v1/decks/{deckId}/cards")
+    fun listDeckCards(
+        @PathVariable deckId: Int,
+        authentication: JwtAuthenticationToken,
+    ): List<DeckCardResponse> = deckService.listDeckCards(deckId, authentication.token.subject)
 
     @PostMapping("/{deckId}/cards")
     @ResponseStatus(HttpStatus.CREATED)

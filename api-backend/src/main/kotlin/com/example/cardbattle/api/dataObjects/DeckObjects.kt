@@ -13,9 +13,17 @@ data class DeckCreateRequest(
     val name: String
 )
 
-data class DeckPatchRequest(
-    val name: String? = null
-)
+class DeckPatchRequest {
+    @get:JsonIgnore
+    var nameProvided: Boolean = false
+        private set
+
+    var name: String? = null
+        set(value) {
+            nameProvided = true
+            field = value
+        }
+}
 
 data class DeckCardResponse(
     val id: Long,

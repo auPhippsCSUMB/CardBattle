@@ -7,6 +7,16 @@ data class UserResponse(
     val isAdmin: Boolean
 )
 
-data class UserAdminPatchRequest(
-    val isAdmin: Boolean? = null
-)
+class UserAdminPatchRequest {
+    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    var adminProvided: Boolean = false
+        private set
+
+    @get:com.fasterxml.jackson.annotation.JsonProperty("isAdmin")
+    @set:com.fasterxml.jackson.annotation.JsonProperty("isAdmin")
+    var isAdmin: Boolean? = null
+        set(value) {
+            adminProvided = true
+            field = value
+        }
+}

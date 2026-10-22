@@ -289,7 +289,11 @@ class DeckRoutesTests {
             .andExpect(jsonPath("$.cardId").value(11))
             .andExpect(jsonPath("$.userId").value(owner.id))
             .andExpect(jsonPath("$.type").value("WARRIOR"))
-            .andExpect(jsonPath("$.card").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.card.id").value(cards.findAll().single().id))
+            .andExpect(jsonPath("$.card.name").value("Warrior"))
+            .andExpect(jsonPath("$.card.authorId").value(owner.id))
+            .andExpect(jsonPath("$.card.imgURL").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.card.description").value(org.hamcrest.Matchers.nullValue()))
             .andReturn()
         val entryId = json.readTree(result.response.contentAsString).path("id").asInt()
         assertTrue(entryId > 0)
@@ -371,6 +375,8 @@ class DeckRoutesTests {
             .andExpect(jsonPath("$.cardId").value(11))
             .andExpect(jsonPath("$.userId").value(owner.id))
             .andExpect(jsonPath("$.type").value("MAGE"))
+            .andExpect(jsonPath("$.card.id").value(cards.findAll().single().id))
+            .andExpect(jsonPath("$.card.type").value("WARRIOR"))
         assertEquals("MAGE", jdbc.queryForObject(
             """SELECT type FROM public."Card_in_deck" WHERE id = 41""", String::class.java,
         ))
@@ -384,6 +390,7 @@ class DeckRoutesTests {
         mvc.perform(patchEntry(deck, 41, "{}"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.type").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.card.name").value("Warrior"))
         mvc.perform(patchEntry(deck, 41, """{"type":"RANGER"}""")).andExpect(status().isOk)
         mvc.perform(patchEntry(deck, 41, "{}"))
             .andExpect(status().isOk).andExpect(jsonPath("$.type").value("RANGER"))
@@ -521,6 +528,22 @@ class DeckRoutesTests {
             mvc.perform(addRequest(deck, checkNotNull(owner.id))).andExpect(status().isCreated)
         }
         assertEquals(5, countRows("Card_in_deck"))
+        assertEquals(1, countRows("User_owns_card"))
+    }
+
+    @Test
+    fun `missing underlying card rolls back add and patch while membership removal still works`() {
+        val owner = registerUser()
+        val deck = seedPopulatedDeck(owner)
+        jdbc.update("""UPDATE public."User_owns_card" SET cardid = NULL WHERE id = 11""")
+        jdbc.update("""UPDATE public."Card_in_deck" SET type = 'WARRIOR' WHERE id = 41""")
+        mvc.perform(addRequest(deck, checkNotNull(owner.id))).andExpect(status().isConflict)
+        assertEquals(1, countRows("Card_in_deck"))
+        mvc.perform(patchEntry(deck, 41, """{"type":"MAGE"}""")).andExpect(status().isConflict)
+        assertEquals("WARRIOR", jdbc.queryForObject(
+            """SELECT type FROM public."Card_in_deck" WHERE id = 41""", String::class.java,
+        ))
+        mvc.perform(deleteEntry(deck, 41)).andExpect(status().isNoContent)
         assertEquals(1, countRows("User_owns_card"))
     }
 
