@@ -3,7 +3,7 @@ info:
   title: CardBattle API
   version: 1.0.0
   description: |
-    Implemented card, deck management/membership, Google authentication, and display-name routes.
+    Implemented card, deck management/membership, inventory creation/listing, Google authentication, and display-name routes.
     Other controller TODOs are excluded until implemented. All routes except health
     require a verified Google ID token. Errors are described by status code; the
     application does not currently guarantee a uniform error response body.
@@ -15,7 +15,9 @@ tags:
   - name: Cards
     description: Authored card management and the shared catalog.
   - name: Decks
-    description: Owner-only deck creation, lookup, deletion, and membership editing.
+    description: Owner-only deck listing, creation, lookup, renaming, deletion, and membership management.
+  - name: Inventory
+    description: Create and list the signed-in user's inventory copies.
   - name: Authentication
     description: Google identity verification and backend user registration.
   - name: Users
@@ -23,7 +25,94 @@ tags:
   - name: Health
     description: Service health.
 paths:
+  /api/v1/inventory:
+    get:
+      tags: [Inventory]
+      operationId: listInventory
+      summary: List inventory copies owned by the signed-in user
+      description: Ordered by inventory ID ascending. Type filtering happens before counting/pagination. Optional userId can only narrow the caller's inventory. Unknown/other user IDs, unregistered callers, or empty matches return an empty page. Broken legacy card/author references on the requested page return 409.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/Type'
+        - name: userId
+          in: query
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        '200':
+          description: Inventory page with embedded card details and matching totals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnershipPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [Inventory]
+      operationId: createOwnership
+      summary: Add an existing card to the signed-in user's inventory
+      description: Requires prior Google user registration. userId must match the authenticated user; cardId is Card.id, not an inventory ID. Repeated requests create distinct copies. This basic route allows self-acquisition; it does not verify purchases, rewards, or scarcity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnershipCreate'
+      responses:
+        '201':
+          description: Created inventory copy with embedded card details. Its id can be passed as cardId when adding a deck entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ownership'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/decks:
+    get:
+      tags: [Decks]
+      operationId: listDecks
+      summary: List decks owned by the signed-in user
+      description: Optional userId only narrows the caller's own decks; another user's ID gives an empty page. Empty matches or out-of-range pages return 200 with empty content and matching totals.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: userId
+          in: query
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: sort
+          in: query
+          description: Equal names use ascending ID as a secondary sort.
+          schema:
+            type: string
+            enum: ['name,asc', 'name,desc', 'id,asc', 'id,desc']
+            default: 'name,asc'
+      responses:
+        '200':
+          description: A page of the caller's decks; an unregistered caller gets an empty page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeckPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
       tags: [Decks]
       operationId: createDeck
@@ -74,6 +163,30 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Decks]
+      operationId: updateDeck
+      summary: Rename a deck owned by the signed-in user
+      description: Only name is editable. Omitted name is a no-op; explicit null is rejected. Unknown fields are ignored. Ownership, membership, and creation timestamp are not editable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeckPatch'
+      responses:
+        '200':
+          description: Renamed or unchanged deck.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags: [Decks]
       operationId: deleteDeck
@@ -93,11 +206,33 @@ paths:
   /api/v1/decks/{deckId}/cards:
     parameters:
       - $ref: '#/components/parameters/DeckId'
+    get:
+      tags: [Decks]
+      operationId: listDeckCards
+      summary: List membership rows in a deck owned by the signed-in user
+      description: Returns an array in ascending membership-ID order, not a paginated response. Empty decks return an empty array. Outer cardId is an inventory ID; nested card contains the underlying Card details and its own ID. Legacy membership type metadata may be null. Missing or other users' decks return 404. Broken inventory/card references return 409 without modifying data.
+      responses:
+        '200':
+          description: Deck membership metadata with embedded card details.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeckCard'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
     post:
       tags: [Decks]
       operationId: addCardToDeck
       summary: Add one of your inventory copies to your deck
-      description: cardId is User_owns_card.id, not Card.id. userId must match the signed-in owner. No deck-size or duplicate-entry rules are enforced in this batch.
+      description: cardId is User_owns_card.id, not Card.id. userId must match the signed-in owner. The response embeds underlying card details. No deck-size or duplicate-entry rules are enforced in this batch.
       requestBody:
         required: true
         content:
@@ -132,7 +267,7 @@ paths:
       tags: [Decks]
       operationId: updateDeckCard
       summary: Update the membership type metadata in your deck
-      description: The membership must belong to the deck in the path. Does not change the underlying Card.type. Omitted type is a no-op; explicit null or an invalid enum is rejected. Other fields are ignored.
+      description: The membership must belong to the deck in the path. Does not change the underlying Card.type or other embedded card fields. The response includes current underlying card details. Omitted type is a no-op; explicit null or an invalid enum is rejected. Other fields are ignored.
       requestBody:
         required: true
         content:
@@ -141,7 +276,7 @@ paths:
               $ref: '#/components/schemas/DeckCardPatch'
       responses:
         '200':
-          description: Updated or unchanged membership. Null inventory references return 409.
+          description: Updated or unchanged membership with embedded card details. Broken inventory/card references return 409.
           content:
             application/json:
               schema:
@@ -447,6 +582,74 @@ components:
         enum: ['name,asc', 'name,desc', 'id,asc', 'id,desc', 'type,asc', 'type,desc']
         default: 'name,asc'
   schemas:
+    Ownership:
+      type: object
+      required: [id, userId, cardId, value, card]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: User_owns_card.id, the inventory copy ID used by deck membership requests.
+        userId:
+          type: integer
+          format: int64
+        cardId:
+          type: integer
+          format: int64
+          description: The underlying Card.id (unlike DeckCard.cardId, which is an inventory ID).
+        value:
+          type: integer
+          format: int32
+          nullable: true
+          description: Existing legacy values are preserved, including null. New copies require a nonnegative value.
+        card:
+          $ref: '#/components/schemas/Card'
+    OwnershipCreate:
+      type: object
+      required: [userId, cardId, value]
+      properties:
+        userId:
+          type: integer
+          format: int64
+          description: Must match the authenticated user.
+        cardId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2147483647
+          description: ID of an existing Card definition.
+        value:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 2147483647
+    OwnershipPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ownership'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+    DeckPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deck'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+    DeckPatch:
+      type: object
+      description: Empty object is a no-op. Only name is editable; explicit null is invalid.
+      properties:
+        name:
+          type: string
+          description: Trimmed before validation; the trimmed name must contain 1 to 150 characters.
     DeckCard:
       type: object
       required: [id, deckId, cardId, userId, type, card]
@@ -472,9 +675,7 @@ components:
           enum: [WARRIOR, BRAWLER, RANGER, MAGE, ROGUE, null]
           description: Membership metadata; older rows may be null.
         card:
-          type: object
-          nullable: true
-          description: Always null in this batch; the underlying card is not embedded.
+          $ref: '#/components/schemas/Card'
     DeckCardCreate:
       type: object
       required: [cardId, userId, type]
@@ -705,4 +906,4 @@ components:
     NotFound:
       description: Card/deck/user/inventory/entry not found, no random-card match, or the caller is not the author/owner for a private action.
     Conflict:
-      description: A database constraint prevents the operation, or a legacy deck entry has no inventory reference.
+      description: A database constraint prevents the operation, or a legacy deck/inventory entry cannot resolve its inventory/card/author reference.

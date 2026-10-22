@@ -5,7 +5,9 @@ import com.example.cardbattle.api.dataObjects.OwnershipPatchRequest
 import com.example.cardbattle.api.dataObjects.OwnershipResponse
 import com.example.cardbattle.api.dataObjects.PageResponse
 import com.example.cardbattle.api.dataObjects.CardType
+import com.example.cardbattle.api.inventory.InventoryService
 import org.springframework.http.HttpStatus
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -19,19 +21,25 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1/inventory")
-class InventoryController {
+class InventoryController(private val inventoryService: InventoryService) {
 
     @GetMapping
     fun listInventory(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
-        @RequestParam(required = false) userId: Long?,
-        @RequestParam(required = false) type: CardType?
-    ): PageResponse<OwnershipResponse> = TODO("Implement GET /api/v1/inventory")
+        @RequestParam(required = false) userId: Int?,
+        @RequestParam(required = false) type: CardType?,
+        authentication: JwtAuthenticationToken,
+    ): PageResponse<OwnershipResponse> = inventoryService.listInventory(
+        authentication.token.subject, page, size, userId, type,
+    )
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun createOwnership(@RequestBody request: OwnershipCreateRequest): OwnershipResponse = TODO("Implement POST /api/v1/inventory")
+    fun createOwnership(
+        @RequestBody request: OwnershipCreateRequest,
+        authentication: JwtAuthenticationToken,
+    ): OwnershipResponse = inventoryService.createOwnership(request, authentication.token.subject)
 
     @PatchMapping("/{ownershipId}")
     fun updateOwnership(

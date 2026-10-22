@@ -4,6 +4,8 @@ import com.example.cardbattle.api.controller.CardsController
 import com.example.cardbattle.api.dataObjects.CardResponse
 import com.example.cardbattle.api.dataObjects.CardType
 import com.example.cardbattle.api.controller.DecksController
+import com.example.cardbattle.api.controller.InventoryController
+import com.example.cardbattle.api.dataObjects.OwnershipResponse
 import com.example.cardbattle.api.dataObjects.DeckResponse
 import com.example.cardbattle.api.dataObjects.DeckCardResponse
 import org.junit.jupiter.api.Test
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestMapping
 import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
 import java.nio.file.Path
@@ -18,7 +21,7 @@ import kotlin.reflect.full.primaryConstructor
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
-/** Keep the published card contract aligned with the implemented controller and response. */
+/** Keep the published contract aligned with implemented routes and response fields. */
 class OpenApiContractTests {
     private val document: Map<String, Any> =
         Yaml().load(Files.readString(Path.of("../docs/openapi.yaml")))
@@ -60,15 +63,33 @@ class OpenApiContractTests {
     }
 
     @Test
+    fun `documented inventory operations include only create and list and embed card details`() {
+        val paths = document["paths"] as Map<*, *>
+        val operations = paths["/api/v1/inventory"] as Map<*, *>
+        assertEquals(setOf("get", "post"), operations.keys)
+        val methods = InventoryController::class.java.declaredMethods
+        assertEquals("createOwnership", methods.single { it.getAnnotation(PostMapping::class.java) != null }.name)
+        assertEquals("listInventory", methods.single { it.getAnnotation(GetMapping::class.java) != null }.name)
+        val schemas = (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
+        val ownership = schemas["Ownership"] as Map<*, *>
+        val fields = ownership["properties"] as Map<*, *>
+        assertEquals(OwnershipResponse::class.primaryConstructor!!.parameters.map { it.name }.toSet(), fields.keys)
+        assertEquals("#/components/schemas/Card", (fields["card"] as Map<*, *>)["\$ref"])
+        assertEquals(true, (fields["value"] as Map<*, *>)["nullable"])
+    }
+
+    @Test
     fun `documented deck operations include only the implemented routes`() {
-        val expected = setOf(
-            "/api/v1/decks" to "post",
-            "/api/v1/decks/{deckId}" to "get",
-            "/api/v1/decks/{deckId}" to "delete",
-            "/api/v1/decks/{deckId}/cards" to "post",
-            "/api/v1/decks/{deckId}/cards/{cardInDeckId}" to "patch",
-            "/api/v1/decks/{deckId}/cards/{cardInDeckId}" to "delete",
-        )
+        val controller = DecksController::class.java
+        val basePath = controller.getAnnotation(RequestMapping::class.java).value.single()
+        val expected = controller.declaredMethods.flatMap { method ->
+            listOfNotNull(
+                method.getAnnotation(GetMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "get" },
+                method.getAnnotation(PostMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "post" },
+                method.getAnnotation(PatchMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "patch" },
+                method.getAnnotation(DeleteMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "delete" },
+            )
+        }.toSet()
         val paths = document["paths"] as Map<*, *>
         val documented = paths.entries.filter { (path, _) ->
             path.toString().startsWith("/api/v1/decks")
@@ -79,8 +100,6 @@ class OpenApiContractTests {
         }.toSet()
         assertEquals(expected, documented)
 
-        // The remaining controller methods intentionally stay TODOs for later batches.
-        val controller = DecksController::class.java
         assertEquals(Int::class.javaPrimitiveType, controller.declaredMethods.single { it.name == "getDeck" }.parameterTypes[0])
         val schemas = (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
         val deck = schemas["Deck"] as Map<*, *>
@@ -93,7 +112,12 @@ class OpenApiContractTests {
             DeckCardResponse::class.primaryConstructor!!.parameters.map { it.name }.toSet(),
             (entry["properties"] as Map<*, *>).keys,
         )
+        val nestedCard = (entry["properties"] as Map<*, *>)["card"] as Map<*, *>
+        assertEquals("#/components/schemas/Card", nestedCard["\$ref"])
         val patch = schemas["DeckCardPatch"] as Map<*, *>
         assertFalse(patch.containsKey("minProperties"), "Empty deck-card PATCH is a no-op")
+        val deckPatch = schemas["DeckPatch"] as Map<*, *>
+        assertFalse(deckPatch.containsKey("minProperties"), "Empty deck PATCH is a no-op")
+        assertEquals(setOf("name"), (deckPatch["properties"] as Map<*, *>).keys)
     }
 }

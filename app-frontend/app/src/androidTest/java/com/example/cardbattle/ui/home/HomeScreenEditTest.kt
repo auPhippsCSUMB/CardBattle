@@ -6,6 +6,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -41,6 +42,12 @@ class HomeScreenEditTest {
         }
     }
 
+    private fun openNameEditor() {
+        compose.onNodeWithText("Your profile").performClick()
+        compose.onNodeWithText("Edit name").performClick()
+        compose.onNodeWithText("Edit display name").assertIsDisplayed()
+    }
+
     @Test
     fun saveTrimsNameAndOnlyShowsItAfterBackendSucceeds() {
         val pending = CompletableDeferred<Unit>()
@@ -50,7 +57,7 @@ class HomeScreenEditTest {
             pending.await()
         }
 
-        compose.onNodeWithText("Edit name").performClick()
+        openNameEditor()
         compose.onNode(hasSetTextAction()).performTextReplacement("  Captain  ")
         compose.onNodeWithText("Save").performClick()
 
@@ -61,7 +68,12 @@ class HomeScreenEditTest {
 
         compose.runOnIdle { pending.complete(Unit) }
         compose.onNodeWithText("Captain").assertIsDisplayed()
-        compose.onNodeWithText("Edit name").assertIsDisplayed()
+        compose.onNodeWithText("Edit display name").assertDoesNotExist()
+        compose.onNodeWithText("Save").assertDoesNotExist()
+
+        // The menu is closed after saving; reopening the editor uses the saved profile name.
+        openNameEditor()
+        compose.onNode(hasSetTextAction()).assertTextContains("Captain")
     }
 
     @Test
@@ -69,14 +81,17 @@ class HomeScreenEditTest {
         var attemptedName: String? = null
         show { attemptedName = it }
 
-        compose.onNodeWithText("Edit name").performClick()
+        openNameEditor()
         compose.onNode(hasSetTextAction()).performTextReplacement("Changed")
         compose.onNodeWithText("Cancel").performClick()
 
         compose.onNodeWithText("Old Name").assertIsDisplayed()
-        compose.onNodeWithText("Edit name").assertIsDisplayed()
+        compose.onNodeWithText("Edit display name").assertDoesNotExist()
         compose.onNodeWithText("Save").assertDoesNotExist()
         compose.runOnIdle { assertNull(attemptedName) }
+
+        openNameEditor()
+        compose.onNode(hasSetTextAction()).assertTextContains("Old Name")
     }
 
     @Test
@@ -84,7 +99,7 @@ class HomeScreenEditTest {
         var attemptedName: String? = null
         show { attemptedName = it }
 
-        compose.onNodeWithText("Edit name").performClick()
+        openNameEditor()
         compose.onNode(hasSetTextAction()).performTextReplacement("   ")
 
         compose.onNodeWithText("Save").assertIsNotEnabled()
@@ -95,7 +110,7 @@ class HomeScreenEditTest {
     fun failedSaveKeepsEditorOpenAndShowsError() {
         show { throw IOException("Backend unavailable") }
 
-        compose.onNodeWithText("Edit name").performClick()
+        openNameEditor()
         compose.onNode(hasSetTextAction()).performTextReplacement("Changed")
         compose.onNodeWithText("Save").performClick()
 

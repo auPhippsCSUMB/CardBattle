@@ -7,6 +7,114 @@ security filter and Boot-configured decoder. It checks successful claims, missin
 tokens, expiration, wrong audience, wrong issuer, wrong signature, and public health access.
 These prove our validation behavior; they do not prove Google Console setup or Railway availability.
 
+## Inventory creation and listing
+
+Run `bash ./gradlew test --tests '*InventoryRoutesTests'` for these routes or
+`bash ./gradlew verify` for all backend tests and service coverage checks.
+Tests use real controllers, services, SQL, and transactions with local H2 and mocked
+Google verification. They do not connect to Railway or Render.
+
+- `POST /api/v1/inventory` accepts `{"userId":1,"cardId":7,"value":0}` and
+  returns 201 with a generated inventory `id` and embedded card details. The user
+  must already be registered through Google sign-in. `userId` must match the token's
+  user, or the response is 400. A missing registered user/card returns 404.
+- Here `cardId` is **Card.id**. The response's `id` is **User_owns_card.id**;
+  use that returned inventory ID as `cardId` when adding a deck membership.
+- The card may have another author. Repeated POSTs create separate inventory copies.
+  Only inventory is created: card authorship, decks, memberships, art, and history
+  are not changed. This basic self-acquisition route has no purchase/reward/scarcity
+  checks; those would be separate server-side game rules if required later.
+- `value` is required and must be an integer from 0 through 2147483647. Missing/null
+  is rejected explicitly rather than accidentally becoming zero. The response value
+  is nullable because older database rows can legitimately contain null; listing
+  preserves those values instead of silently inventing zero.
+- `GET /api/v1/inventory` returns `content` plus `page` metadata, with zero-based
+  `page` (default 0), `size` (default 20, range 1–100), optional uppercase `type`,
+  and optional positive integer `userId`. Ordering is always inventory ID ascending;
+  no sort parameter is introduced. Type filtering/counting happen before pagination.
+- Only the authenticated user's copies are visible. `userId` can narrow their own
+  inventory but cannot expose another account: another user's or an unknown positive
+  ID returns an empty page. Unregistered callers and callers with no matches also
+  get empty pages. Pages beyond the end retain the matching total with empty content.
+- Both routes require valid tokens (401 otherwise). Invalid input/parameters return
+  400. Constraint conflicts and broken legacy card/author references return 409;
+  writes roll back. Inventory PATCH/DELETE remain TODOs for a future batch.
+
+Extra complexity: a small JDBC repository uses a joined card query for display,
+a matching count query for pagination, and generated-key retrieval for INSERT.
+It follows the deck SQL approach without new JPA entities or dependencies. Optional
+type filters use fixed SQL fragments and bound values, not interpolated user text.
+No schema migration is needed if `User_owns_card.id` already auto-generates, as it
+does in the checked-in local schema. The test fixture now models that identity too.
+
+### Manual terminal checks
+
+If using Docker, rebuild from the repository root with
+`docker compose up --build -d api`. Use a fresh Google ID token and an existing
+card ID. These commands write to whichever database that API connects to.
+
+```bash
+export BASE_URL='http://localhost:8080'
+export CARD_TOKEN='PASTE_FRESH_GOOGLE_ID_TOKEN'
+
+# Register/refresh your backend user first. Copy its numeric id into USER_ID.
+curl -i -X POST "$BASE_URL/api/v1/auth/google" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+export USER_ID=1
+export CARD_ID=7
+
+# Expect 201. This card ID comes from Card, not User_owns_card.
+curl -i -X POST "$BASE_URL/api/v1/inventory" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"userId\":$USER_ID,\"cardId\":$CARD_ID,\"value\":0}"
+
+# Expect 200 with owned copies and embedded card details.
+curl -i "$BASE_URL/api/v1/inventory?page=0&size=2" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Filter by underlying card type. May return an empty page.
+curl -i "$BASE_URL/api/v1/inventory?page=0&size=2&type=MAGE" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 400, then 401.
+curl -i "$BASE_URL/api/v1/inventory?page=-1" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+curl -i "$BASE_URL/api/v1/inventory"
+```
+
+For an ownership check, try a second user's `userId` with your token: POST should
+return 400; GET with that filter should return an empty page, not their inventory.
+
+### Manual SQL checks
+
+Use the same database and replace user ID `1` with your ID. Verify automatic ID
+generation first: `is_identity` should be YES or column_default should contain an
+appropriate sequence default. If both are absent, apply the ID-generation correction
+before POSTing; do not recreate or clear your table.
+
+```sql
+SELECT column_name, is_identity, column_default
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'User_owns_card' AND column_name = 'id';
+
+SELECT owned.id AS inventory_id, owned.userid, owned.cardid, owned.value,
+       card.name, card.type, card.author
+FROM public."User_owns_card" owned
+LEFT JOIN public."Card" card ON card.id = owned.cardid
+WHERE owned.userid = 1
+ORDER BY owned.id;
+
+SELECT COUNT(*) AS total_inventory
+FROM public."User_owns_card" WHERE userid = 1;
+
+SELECT COUNT(*) AS matching_mages
+FROM public."User_owns_card" owned
+JOIN public."Card" card ON card.id = owned.cardid
+WHERE owned.userid = 1 AND card.type = 'MAGE';
+```
+
 ## Deck creation, lookup, and deletion
 
 Run `bash ./gradlew test --tests '*DeckRoutesTests'` for these three routes, or
@@ -27,8 +135,8 @@ Google token verification is mocked. They do not connect to Railway or Render.
   out-of-range IDs return 400. Deleting the same deck twice returns 404 the second time.
 - If another foreign key blocks deletion, both deletions roll back and the response
   is 409. Tests explicitly check that membership rows are restored on rollback.
-- The deck starts empty; listing decks, listing deck cards, renaming decks, and checking
-  battle readiness remain TODOs. No schema migration is needed
+- The deck starts empty. Listing decks, listing entries, and renaming decks are
+  implemented below; battle-readiness rules are outside these routes. No schema migration is needed
   for the checked-in schema. `Deck.id` must already have an identity or sequence default
   in Railway, just like `Card.id`; the SQL below lets you check without changing it.
 
@@ -128,19 +236,57 @@ when a database constraint blocks a write.
 - `cardInDeckId` means `Card_in_deck.id`, which is returned by the POST. A missing
   entry or an entry from a different deck returns 404. All routes require valid
   tokens and deck ownership. Constraint conflicts return 409 and roll back.
-- The response contains membership IDs and metadata; `card` stays null (no extra
-  card fetch). The `type` response is now nullable because older database rows may
+- The response contains membership IDs and metadata plus an embedded `card` with
+  its underlying ID, name, image URL, description, type, and author ID. The outer
+  `cardId` is still the inventory ID; `card.id` is the actual Card ID. The outer
+  `type` response is nullable because older database rows may
   already have null metadata. New entries must supply a non-null enum.
 - This batch does not impose a three-card maximum, unique type slots, or duplicate
   inventory-copy restrictions. Repeated POSTs create separate membership rows unless
   your database has additional constraints. These are editing routes, not battle-readiness checks.
 
-Extra complexity is limited to one small JDBC repository for the two existing link
-tables; no full inventory entity or inventory API implementation is introduced.
+Extra complexity is limited to one small JDBC repository for existing link tables
+and a join to Card; the deck operations need no full inventory entity.
 Spring's service transaction covers both the existing JPA deck lookup and these SQL
 operations. PATCH tracks whether `type` was supplied, following the card PATCH pattern.
-Legacy entries without an inventory reference can still be removed; PATCH returns 409
-and rolls back any update rather than returning a fake inventory ID.
+Legacy entries without a usable inventory/card/author reference can still be removed;
+listing/add/PATCH returns 409 and rolls back any write rather than returning fake details.
+
+### Embedded card details
+
+GET-membership-list, POST-membership, and PATCH-membership all populate the same
+existing `card` response field. The repository reads `Card_in_deck` -> `User_owns_card`
+-> `Card` in one joined SELECT for the list (not one extra query per entry). POST
+reads its inserted entry through that same query; PATCH reuses the joined lookup.
+LEFT JOIN retains broken legacy entries so they can produce 409 rather than silently
+disappearing. Existing ownership checks, membership ordering, and all ID meanings remain.
+
+The nested `card.type` and outer `type` are different fields: changing membership
+metadata does not edit the shared card. The nested author ID may differ from the
+deck owner. Tests cover multiple distinct cards, current names/image URLs/descriptions,
+another author's card in the caller's inventory, null optional fields, and rollback
+on broken card links. No schema change or drawing-byte query was added; `imgURL`
+is the existing URL, not the PNG stored in `card_art`.
+
+Example response (IDs are illustrative):
+
+```json
+{
+  "id": 41,
+  "deckId": 123,
+  "cardId": 11,
+  "userId": 1,
+  "type": "WARRIOR",
+  "card": {
+    "id": 7,
+    "name": "My Mage",
+    "imgURL": null,
+    "description": "A shared card definition",
+    "type": "MAGE",
+    "authorId": 2
+  }
+}
+```
 
 ### Check automatic membership IDs first
 
@@ -173,15 +319,14 @@ WHERE owned.userid = 1;
 ```
 
 Creating a card does not automatically give you an inventory copy. If this SELECT
-returns nothing, add a deliberate test inventory row first (replace user/card IDs
-with existing ones you own/intend to use). This writes real test data; the routes
-do not grant inventory automatically:
+returns nothing, create a copy through the inventory API first (replace user/card
+IDs with your actual values). This writes a real inventory row:
 
-```sql
--- Check User_owns_card.id has identity/sequence generation before using this INSERT.
-INSERT INTO public."User_owns_card" (userid, cardid, value)
-VALUES (1, 7, 0)
-RETURNING id, userid, cardid;
+```bash
+curl -i -X POST "$BASE_URL/api/v1/inventory" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":1,"cardId":7,"value":0}'
 ```
 
 ```bash
@@ -238,6 +383,120 @@ WHERE entry.id = 41;
 SELECT * FROM public."User_owns_card" WHERE id = 11;
 SELECT id, userid, name FROM public."Deck" WHERE id = 123;
 SELECT COUNT(*) AS battle_results FROM public."Wins";
+```
+
+To verify the nested card response directly, compare this SELECT with
+`GET /api/v1/decks/123/cards` (replace the deck ID):
+
+```sql
+SELECT entry.id AS membership_id, entry.cardid AS inventory_id,
+       entry.type AS membership_type, card.id AS underlying_card_id,
+       card.name, card.imgurl, card.description, card.type AS card_type, card.author
+FROM public."Card_in_deck" entry
+LEFT JOIN public."User_owns_card" owned ON owned.id = entry.cardid
+LEFT JOIN public."Card" card ON card.id = owned.cardid
+WHERE entry.deckid = 123
+ORDER BY entry.id;
+```
+
+## Paginated deck lists, membership lists, and renaming
+
+Run `bash ./gradlew test --tests '*DeckListAndPatchTests'` for this batch or
+`bash ./gradlew verify` for the full backend suite. These tests use H2 and mocked
+Google verification, with real controllers, services, repositories, and SQL.
+No Railway/Render connection or real Google account is needed for automated tests.
+
+- `GET /api/v1/decks` returns only the authenticated user's decks, wrapped in
+  `content` and `page` just like the card-list routes. Page numbers start at zero;
+  defaults are `page=0`, `size=20`, and `sort=name,asc`. Size must be 1–100.
+- Supported sorts are `name,asc`, `name,desc`, `id,asc`, and `id,desc`. Equal names
+  use ascending ID as a tie-breaker. Filtering/counting happen before pagination.
+- The existing optional `userId` parameter only narrows your own decks. Your own
+  ID returns matches; another user's ID or an unknown positive ID returns an empty
+  page, never another user's decks. Nonpositive/malformed/out-of-range IDs return 400.
+- Empty matches, an unregistered caller, and pages beyond the end return 200 with
+  empty content. Pages beyond the end still report the matching total.
+- `GET /api/v1/decks/{deckId}/cards` returns a plain array (not a page), ordered
+  by membership ID ascending. Empty owned decks return `[]`. Fields match the add/
+  PATCH membership response: `id` is the membership ID, `cardId` is the inventory
+  ID, `userId` is the deck owner, and `card` embeds the underlying CardResponse.
+  Legacy null membership `type` values remain null. Broken inventory/card/author
+  references return 409 without modifying anything,
+  consistent with membership PATCH; the existing remove route can remove that row.
+- `PATCH /api/v1/decks/{deckId}` accepts `{"name":"New name"}`. Name is trimmed
+  and must contain 1–150 characters. `{}` is a no-op; explicit null, blank, or an
+  overlong name returns 400. Unknown fields are ignored. Ownership, IDs, membership,
+  and the existing null `createdAt` are not editable.
+- All three routes require a valid token (401 otherwise). Missing/other users'
+  decks return 404 for membership listing and renaming. Malformed or out-of-range
+  path IDs return 400. Every DecksController route is now implemented.
+
+Extra complexity: pagination uses the same Spring Data PageRequest and stable-sort
+approach as cards. Rename tracks whether name was supplied, following the existing
+PATCH pattern, and shares createDeck's name validation. Entry listing reuses the
+existing joined SQL row mapper and owner checks; no extra entities, timestamp
+columns, schema migrations, or inventory grants were added.
+
+### Manual terminal checks
+
+Rebuild your local API if using Docker (`docker compose up --build -d api` from
+the repository root). Use a fresh Google ID token belonging to an already registered
+user. Requests use whichever database that API is configured to connect to.
+
+```bash
+export BASE_URL='http://localhost:8080'
+export CARD_TOKEN='PASTE_FRESH_GOOGLE_ID_TOKEN'
+
+# Expect 200 with content and page metadata.
+curl -i "$BASE_URL/api/v1/decks?page=0&size=2&sort=name,asc" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Page 1 skips the first two matches; it may be empty.
+curl -i "$BASE_URL/api/v1/decks?page=1&size=2&sort=name,asc" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Copy an owned deck ID from the list above.
+export DECK_ID=123
+
+# Expect 200 with membership metadata and nested card details, or [] for an empty deck.
+curl -i "$BASE_URL/api/v1/decks/$DECK_ID/cards" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 200 with the trimmed new name.
+curl -i -X PATCH "$BASE_URL/api/v1/decks/$DECK_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"  Renamed Deck  "}'
+
+# Expect 200 with the same name (no-op).
+curl -i -X PATCH "$BASE_URL/api/v1/decks/$DECK_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
+
+# Expect 400; the name stays unchanged.
+curl -i -X PATCH "$BASE_URL/api/v1/decks/$DECK_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":null}'
+
+# Expect 400 for invalid pagination and 401 without a token.
+curl -i "$BASE_URL/api/v1/decks?page=-1" -H "Authorization: Bearer $CARD_TOKEN"
+curl -i "$BASE_URL/api/v1/decks"
+```
+
+For ownership checks, use a second account's token: it should not see your deck in
+its list, and its GET-membership/PATCH-name requests for your deck should return 404.
+
+### Manual SQL checks
+
+Replace user ID `1` and deck ID `123` with actual IDs. The count should match
+`page.totalElements`. After renaming, only the deck name should have changed;
+membership rows remain unchanged. List responses use inventory IDs, not Card IDs.
+
+```sql
+SELECT id, userid, name FROM public."Deck" WHERE userid = 1 ORDER BY name, id;
+SELECT COUNT(*) AS matching_decks FROM public."Deck" WHERE userid = 1;
+SELECT id, userid, name FROM public."Deck" WHERE id = 123;
+SELECT id, deckid, cardid AS inventory_id, userid, type
+FROM public."Card_in_deck" WHERE deckid = 123 ORDER BY id;
 ```
 
 ## Card creation
