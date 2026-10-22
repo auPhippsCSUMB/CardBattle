@@ -539,6 +539,133 @@ paths:
             $ref: '#/components/responses/GoogleIdentity'
         '401':
             $ref: '#/components/responses/Unauthorized'
+  /api/v1/users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List users (database admins only)
+      description: Includes emails and admin flags, so ordinary users receive 403. Requires a registered caller. Filters before pagination, using a case-insensitive literal display-name substring. Sort supports id or displayName with asc or desc; displayName ties use ascending ID.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: displayName
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            default: displayName,asc
+            enum: ['displayName,asc', 'displayName,desc', 'id,asc', 'id,desc']
+      responses:
+        '200':
+          description: Matching user page, including an empty page when no users match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/users/me:
+    delete:
+      tags: [Users]
+      operationId: deleteMyProfile
+      summary: Delete the caller's unlinked backend account
+      description: Resolves the user from the verified Google subject. Existing foreign keys block deletion with 409 if game data still references the user; no related data is deleted. Does not delete the Google account or revoke its token. A later Google sign-in can recreate a non-admin backend account.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Users]
+      operationId: getUser
+      summary: Get your own profile, or any profile as an admin
+      description: Other users' profiles return 403 to non-admin callers; emails are not publicly exposed. A registered caller is required.
+      responses:
+        '200':
+          $ref: '#/components/responses/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Users]
+      operationId: updateUser
+      summary: Change a user's admin flag (database admins only)
+      description: Only isAdmin is editable. Empty or unknown-only objects are no-ops; explicit null is rejected. Admin status is read from the database, not request fields or token claims. Admins may demote themselves; subsequent admin operations then return 403. Google sign-in preserves the stored admin flag.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserAdminPatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Users]
+      operationId: deleteUser
+      summary: Delete an unlinked backend user (database admins only)
+      description: Uses the same restrictive, transactional deletion as DELETE users/me. Existing cards, inventory, decks, or battle history can block deletion with 409. Does not delete a Google account or revoke tokens.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/users/{userId}/stats:
+    get:
+      tags: [Users]
+      operationId: getUserStats
+      summary: Get an existing user's game statistics
+      description: Available with any valid Google token, without exposing profile email or admin fields. Counts winninguser and losinguser directly in Wins, so deleted-card references do not erase user results. Total battles counts each matching row once, including a self-match. Win rate is wins divided by wins plus losses, or zero with no results.
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          $ref: '#/components/responses/Stats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/users/me/display-name:
     put:
       tags: [Users]
@@ -579,6 +706,14 @@ components:
       bearerFormat: JWT
       description: Google-issued ID token targeting the configured Google Web client ID.
   parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
     DeckId:
       name: deckId
       in: path
@@ -874,13 +1009,29 @@ components:
           type: integer
         totalBattles:
           type: integer
-          description: Battle rows involving the card; a same-card match counts once.
+          description: Matching battle rows for the requested card or user; a same-card or self-match counts once.
         winRate:
           type: number
           format: double
           minimum: 0
           maximum: 1
           description: Wins divided by wins plus losses, or zero with no results.
+    UserPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+    UserAdminPatch:
+      type: object
+      description: Only isAdmin can be changed. Omitted means unchanged; null is invalid. Unknown fields are ignored.
+      properties:
+        isAdmin:
+          type: boolean
     User:
       type: object
       required: [id, email, displayName, isAdmin]
@@ -934,7 +1085,7 @@ components:
           schema:
             $ref: '#/components/schemas/CardPage'
     Stats:
-      description: Battle statistics for the existing card.
+      description: Battle statistics for the existing card or user.
       content:
         application/json:
           schema:
@@ -963,7 +1114,9 @@ components:
       description: Invalid parameters, invalid fields, or malformed JSON.
     Unauthorized:
       description: Missing, expired, or otherwise invalid Google token.
+    Forbidden:
+      description: The registered caller lacks permission; admin checks use the stored database flag.
     NotFound:
       description: Card/deck/user/inventory/entry not found, no random-card match, or the caller is not the author/owner for a private action.
     Conflict:
-      description: A database constraint prevents the operation, or a legacy deck/inventory entry cannot resolve its inventory/card/author reference.
+      description: A database constraint prevents the operation (including user deletion blocked by linked game data), or a legacy deck/inventory entry cannot resolve its inventory/card/author reference.

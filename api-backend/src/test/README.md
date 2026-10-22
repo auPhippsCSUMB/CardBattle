@@ -772,6 +772,159 @@ only `SELECT 1` on a read-only connection. It never runs Hibernate/schema update
 It checks the configured endpoint: ensure it is your Railway development database/tunnel.
 A connection-refused error usually means the tunnel stopped or the local port changed.
 
+## User routes: profiles, administration, stats, and safe deletion
+
+All six former `UsersController` TODOs are implemented. The existing Google sign-in and
+display-name endpoints remain unchanged. No new dependency, database migration, Google
+configuration, or frontend change is needed.
+
+Permissions (a valid Google ID token is required for every route):
+
+| Route | Who can use it? |
+| --- | --- |
+| `GET /api/v1/users` | Registered database admins only; includes email and admin status. |
+| `GET /api/v1/users/{userId}` | That user or a registered database admin. |
+| `PATCH /api/v1/users/{userId}` | Registered database admins only; edits only `isAdmin`. |
+| `DELETE /api/v1/users/{userId}` | Registered database admins only. |
+| `DELETE /api/v1/users/me` | The registered caller; identity comes from the verified token's subject. |
+| `GET /api/v1/users/{userId}/stats` | Any valid token; only game stats are returned. |
+
+Missing/invalid tokens return 401. Registered callers without permission get 403;
+unregistered callers get 404 for operations requiring a stored account. Missing target users
+return 404 after authorization. Malformed/overflowing IDs return 400; authorized requests
+with nonpositive IDs also return 400.
+
+Extra complexity is limited to database-backed permission checks, paginated filtering,
+PATCH field-presence tracking, and safe transaction handling. User deletion deliberately
+does **not** introduce a new cascade policy: existing cards, inventory, decks, and battle
+history may block it with 409, leaving everything intact. No schema changes are needed.
+It does not delete a Google account, revoke tokens, or prevent signing in again: the normal
+Google sign-in endpoint can recreate a deleted user with `isAdmin=false`.
+
+Admin status is read from the database for each operation, never accepted from token
+claims or sign-in request data. Google sign-in preserves the stored flag. An admin can
+demote themselves, including the last admin; restoring access then requires a trusted
+database operator. There is intentionally no public "make me admin" endpoint.
+
+The first admin must be set by a trusted database operator. Inspect accounts first:
+
+```sql
+SELECT id, email, displayname, isadmin FROM public."User" ORDER BY id;
+-- Optional bootstrap: replace 123 with the inspected account you intend to make admin.
+UPDATE public."User" SET isadmin = TRUE WHERE id = 123;
+```
+
+Run offline tests from the repository root:
+
+```bash
+cd api-backend
+bash ./gradlew test --tests '*UserRoutesTests' --tests '*OpenApiContractTests'
+bash ./gradlew verify --console=plain
+```
+
+`UserRoutesTests` uses H2 with the real HTTP/service/repository layers. Only token decoding
+is mocked; existing `AuthSecurityTests` separately exercise real JWT verification. Tests cover
+all six routes, self/admin authorization, promotion attempts, immediate demotion, Google
+sign-in compatibility, pagination/filtering/sort, PATCH omission/null, stats, and deletion
+blocked independently by cards, inventory, decks, and either side of battle history.
+
+Manual checks: start/rebuild the backend with your usual Docker configuration. Use a fresh
+Google ID token in `CARD_TOKEN` and the database user ID returned by `POST auth/google`.
+Replace the example IDs; do not use `/auth/me`'s Google subject as a database user ID.
+Use HTTPS when pointing these commands at Render.
+
+```bash
+export API_URL='http://localhost:8080'
+export USER_ID=123 # replace with your actual database user ID
+
+# Register/refresh your backend account first. Expect 200 or 201.
+curl -i -X POST "$API_URL/api/v1/auth/google" -H "Authorization: Bearer $CARD_TOKEN"
+
+# Your own profile: expect 200. Does not expose google_subject.
+curl -i "$API_URL/api/v1/users/$USER_ID" -H "Authorization: Bearer $CARD_TOKEN"
+
+# Your stats: expect 200. With no battle results, all fields are zero.
+curl -i "$API_URL/api/v1/users/$USER_ID/stats" -H "Authorization: Bearer $CARD_TOKEN"
+
+# Admin-only: expect 403 as a normal registered user, 200 after trusted admin bootstrap.
+curl -i "$API_URL/api/v1/users?page=0&size=2&sort=displayName,asc" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# As an admin, filter the matching total before pagination. May return an empty page.
+curl -i --get "$API_URL/api/v1/users" --data-urlencode 'displayName=alice' \
+  --data-urlencode 'size=2' --data-urlencode 'sort=id,desc' \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# As an admin: invalid pagination returns 400.
+curl -i "$API_URL/api/v1/users?page=-1" -H "Authorization: Bearer $CARD_TOKEN"
+
+# No token: expect 401.
+curl -i "$API_URL/api/v1/users/$USER_ID/stats"
+```
+
+To test admin PATCH, use a separate, consenting test account as the target. Do not
+demote your only admin or delete an account you need. Supply the administrator's token
+as `CARD_TOKEN`, and set `TEST_USER_ID` to the other account's database ID.
+
+```bash
+export TEST_USER_ID=456 # replace with the test account's ID
+
+# As admin: expect 200; no change.
+curl -i -X PATCH "$API_URL/api/v1/users/$TEST_USER_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{}'
+
+# As admin: expect 400; no change.
+curl -i -X PATCH "$API_URL/api/v1/users/$TEST_USER_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{"isAdmin":null}'
+
+# As admin: promote the consenting test account. Expect 200 with isAdmin true.
+curl -i -X PATCH "$API_URL/api/v1/users/$TEST_USER_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{"isAdmin":true}'
+
+# Restore that account to ordinary user status. Expect 200 with isAdmin false.
+curl -i -X PATCH "$API_URL/api/v1/users/$TEST_USER_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' -d '{"isAdmin":false}'
+
+# DESTRUCTIVE: only run for a disposable test account.
+# As admin: expect 204 if unlinked; 409 if linked game data blocks deletion.
+# After successful deletion, repeating returns 404.
+curl -i -X DELETE "$API_URL/api/v1/users/$TEST_USER_ID" -H "Authorization: Bearer $CARD_TOKEN"
+
+# DESTRUCTIVE ALTERNATIVE: use the disposable account's own token, not your admin token.
+# Expect 204 if unlinked, or 409 if linked. Do not run against your main account.
+# curl -i -X DELETE "$API_URL/api/v1/users/me" -H "Authorization: Bearer $DISPOSABLE_TOKEN"
+```
+
+Verify the stored profile/admin flag and stats in Railway (replace 123 with the target ID):
+
+```sql
+SELECT id, email, displayname, isadmin FROM public."User" WHERE id = 123;
+
+SELECT
+    COUNT(*) FILTER (WHERE winninguser = 123) AS wins,
+    COUNT(*) FILTER (WHERE losinguser = 123) AS losses,
+    COUNT(*) AS total_battles,
+    COALESCE(
+        (COUNT(*) FILTER (WHERE winninguser = 123))::double precision /
+        NULLIF((COUNT(*) FILTER (WHERE winninguser = 123)) +
+               (COUNT(*) FILTER (WHERE losinguser = 123)), 0),
+        0
+    ) AS win_rate
+FROM public."Wins"
+WHERE winninguser = 123 OR losinguser = 123;
+
+-- Investigate a blocked deletion without deleting related data:
+SELECT 'cards' AS relation_name, COUNT(*) AS linked_rows FROM public."Card" WHERE author = 123
+UNION ALL SELECT 'inventory', COUNT(*) FROM public."User_owns_card" WHERE userid = 123
+UNION ALL SELECT 'decks', COUNT(*) FROM public."Deck" WHERE userid = 123
+UNION ALL SELECT 'battles', COUNT(*) FROM public."Wins" WHERE winninguser = 123 OR losinguser = 123;
+```
+
+Stats use user references directly, not card/inventory joins, so null card references do
+not lose user results. `winRate` is a fraction (0.5 means 50%). A self-match contributes
+one win and one loss but only one `totalBattles`, matching the card-stats convention.
+Profile name edits still refresh from Google's name on the next Google sign-in.
+
 ## Live Google sign-in and API authentication
 
 Start the backend with its normal Google issuer and Web client ID configuration and a working

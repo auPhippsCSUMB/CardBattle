@@ -5,6 +5,9 @@ import com.example.cardbattle.api.dataObjects.CardResponse
 import com.example.cardbattle.api.dataObjects.CardType
 import com.example.cardbattle.api.controller.DecksController
 import com.example.cardbattle.api.controller.InventoryController
+import com.example.cardbattle.api.controller.UsersController
+import com.example.cardbattle.api.user.UserController
+import com.example.cardbattle.api.dataObjects.UserResponse
 import com.example.cardbattle.api.dataObjects.OwnershipResponse
 import com.example.cardbattle.api.dataObjects.DeckResponse
 import com.example.cardbattle.api.dataObjects.DeckCardResponse
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
@@ -25,6 +29,33 @@ import kotlin.test.assertFalse
 class OpenApiContractTests {
     private val document: Map<String, Any> =
         Yaml().load(Files.readString(Path.of("../docs/openapi.yaml")))
+
+    @Test
+    fun `documented user operations match both controllers and expose only supported fields`() {
+        val expected = listOf(UsersController::class.java, UserController::class.java).flatMap { controller ->
+            val base = controller.getAnnotation(RequestMapping::class.java).value.single()
+            controller.declaredMethods.flatMap { method ->
+                listOfNotNull(
+                    method.getAnnotation(GetMapping::class.java)?.let { base + it.value.firstOrNull().orEmpty() to "get" },
+                    method.getAnnotation(PutMapping::class.java)?.let { base + it.value.firstOrNull().orEmpty() to "put" },
+                    method.getAnnotation(PatchMapping::class.java)?.let { base + it.value.firstOrNull().orEmpty() to "patch" },
+                    method.getAnnotation(DeleteMapping::class.java)?.let { base + it.value.firstOrNull().orEmpty() to "delete" },
+                )
+            }
+        }.toSet()
+        val paths = document["paths"] as Map<*, *>
+        val actual = paths.entries.filter { it.key.toString().startsWith("/api/v1/users") }.flatMap { (path, operations) ->
+            (operations as Map<*, *>).keys.filter { it in setOf("get", "put", "patch", "delete") }
+                .map { path.toString() to it.toString() }
+        }.toSet()
+        assertEquals(expected, actual)
+        val schemas = (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
+        assertEquals(UserResponse::class.primaryConstructor!!.parameters.map { it.name }.toSet(),
+            ((schemas["User"] as Map<*, *>)["properties"] as Map<*, *>).keys)
+        val patch = schemas["UserAdminPatch"] as Map<*, *>
+        assertEquals(setOf("isAdmin"), (patch["properties"] as Map<*, *>).keys)
+        assertFalse(patch.containsKey("minProperties"))
+    }
 
     @Test
     fun `documented card operations match the implemented routes`() {
