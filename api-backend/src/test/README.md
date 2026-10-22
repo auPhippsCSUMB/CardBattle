@@ -772,6 +772,180 @@ only `SELECT 1` on a read-only connection. It never runs Hibernate/schema update
 It checks the configured endpoint: ensure it is your Railway development database/tunnel.
 A connection-refused error usually means the tunnel stopped or the local port changed.
 
+## Battle routes: record results, list history, and get one result
+
+Implemented all three routes with the same controller → service → repository structure:
+
+| Route | Expected success |
+| --- | --- |
+| `POST /api/v1/battles` | 201 with the generated result ID. |
+| `GET /api/v1/battles?page=0&size=20&userId=1` | 200 with filtered content and page totals. |
+| `GET /api/v1/battles/{battleId}` | 200 with one result. |
+
+All three require a valid Google ID token. History is readable by any authenticated caller,
+consistent with the existing shared game-statistics routes; it does not expose email addresses.
+Creation additionally requires a registered caller who is either the winning or losing user.
+Other callers receive 403, including unrelated admins. Unregistered creators receive 404.
+
+Extra complexity and intentional limits:
+
+- Both users must exist and be different. Each inventory copy must belong to its stated
+  player and reference an existing card. Invalid IDs/self-matches return 400; nonexistent
+  users or missing/mismatched inventory copies return 404. No deck is required.
+- `winningCard` and `losingCard` are **User_owns_card ownership IDs**, not shared Card IDs.
+  Both players can use separate copies of the same shared card.
+- This is **participant-reported result storage**, not a battle engine. The server cannot
+  prove the submitted winner actually won. Do not treat it as anti-cheat-protected ranking
+  data. Server-run combat or independently verified match results would be a separate feature.
+- Repeated POSTs create separate results, including repeated statistics. There is no match ID
+  or duplicate-submission protection in the existing schema. Avoid retrying successful POSTs.
+- Listing defaults to page 0, size 20 (maximum 100), ordered by result ID ascending.
+  `userId` matches either player before counting/pagination. Missing filter users and pages
+  beyond the end return empty content. Count plus page queries use bound SQL parameters.
+- No timestamp column is added; `occurredAt` remains null. Existing inventory/card deletion
+  rules preserve the battle with null card references. User stats still count its players.
+  A legacy result missing either user returns 409 if fetched or included in the requested page,
+  rather than silently reporting that missing user as ID 0. No legacy data is changed.
+- Inserts are transactional; a database integrity constraint returns 409 with no partial result.
+  New code uses existing JDBC/JPA support; no new dependency or OAuth configuration is needed.
+
+### Check ID generation first
+
+The new-empty-local schema already makes `Wins.id` an identity column. Existing Railway or
+older local tables may still need the same fix used for cards and inventory. Inspect first:
+
+```sql
+SELECT column_name, data_type, is_identity, identity_generation, column_default
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'Wins' AND column_name = 'id';
+```
+
+If `is_identity` is `NO` **and** `column_default` is null, manually run
+`api-backend/db/migrations/20261022_wins_identity.sql` in your database SQL client.
+The complete script can be pasted into the query console; it preserves existing rows/IDs,
+starts the new sequence after existing results, and skips columns already using identity or
+a sequence default. This script is **not automatically applied** by the backend and was not
+run against Railway during implementation. It briefly locks Wins while updating its schema.
+If identity is already `YES`, or an existing sequence default is present, no change is needed
+for normal generated IDs. Re-run the inspection afterward to confirm.
+
+### Offline automated checks
+
+From the repository root:
+
+```bash
+cd api-backend
+bash ./gradlew test --tests '*BattleRoutesTests' --tests '*OpenApiContractTests'
+bash ./gradlew verify --console=plain
+```
+
+Tests run real HTTP/service/repository/transaction behavior against H2 with mocked token
+decoding. Existing security tests still cover real JWT validation. Battle tests cover both
+participants posting, third-party rejection, user/card ownership, missing/null/invalid IDs,
+pagination/filtering, generated result IDs, constraint rollback, existing card/user stats,
+and history with deleted inventory/card references. The shared test fixture now gives Wins
+an identity column, matching the existing new-local PostgreSQL schema.
+
+### Manual curl checks
+
+Rebuild/start the backend with your usual Docker configuration. Get a fresh Google ID token
+in `CARD_TOKEN`. Use **two existing registered users** and an inventory entry owned by each.
+The token must belong to one of those users; a single user cannot battle themselves.
+Your coworker can create their inventory entry using their token and share its ownership ID.
+No need to create additional cards if those entries already exist.
+
+Find the database IDs using read-only SQL:
+
+```sql
+SELECT id, displayname FROM public."User" ORDER BY id;
+SELECT owned.id AS ownership_id, owned.userid, owned.cardid AS shared_card_id, card.name
+FROM public."User_owns_card" owned
+JOIN public."Card" card ON card.id = owned.cardid
+ORDER BY owned.userid, owned.id;
+```
+
+Replace every example ID below with actual IDs from your database. Do not confuse ownership
+IDs with shared card IDs or Google subject strings. Use HTTPS if testing Render.
+
+```bash
+export API_URL='http://localhost:8080'
+export WINNER_USER_ID=1
+export LOSER_USER_ID=2
+export WINNER_OWNERSHIP_ID=101
+export LOSER_OWNERSHIP_ID=102
+
+# MUTATES STATS: expect 201. Run once, then copy the returned id into BATTLE_ID.
+# Your token may belong to either stated player; do not invent a real competitive result.
+curl -i -w '\n\n' -X POST "$API_URL/api/v1/battles" \
+  -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"winningUser\":$WINNER_USER_ID,\"losingUser\":$LOSER_USER_ID,\"winningCard\":$WINNER_OWNERSHIP_ID,\"losingCard\":$LOSER_OWNERSHIP_ID}"
+
+export BATTLE_ID=1 # replace with the result id returned above
+
+# Expect 200 with the saved result. occurredAt is null.
+curl -i -w '\n\n' "$API_URL/api/v1/battles/$BATTLE_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 200 with the first page. Page 1 is the SECOND page.
+curl -i -w '\n\n' "$API_URL/api/v1/battles?page=0&size=2" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 200, filtered to results where this user won OR lost.
+curl -i -w '\n\n' "$API_URL/api/v1/battles?userId=$WINNER_USER_ID&page=0&size=2" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 200 with empty content if this page is past the end.
+curl -i -w '\n\n' "$API_URL/api/v1/battles?page=100000&size=20" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 400 for invalid pagination.
+curl -i -w '\n\n' "$API_URL/api/v1/battles?page=-1" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 401 without a token.
+curl -i -w '\n\n' "$API_URL/api/v1/battles"
+
+# Expect 200; the player's stats include the newly recorded result.
+curl -i -w '\n\n' "$API_URL/api/v1/users/$WINNER_USER_ID/stats" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 400: a user cannot be both players. No result should be inserted.
+curl -i -w '\n\n' -X POST "$API_URL/api/v1/battles" \
+  -H "Authorization: Bearer $CARD_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"winningUser\":$WINNER_USER_ID,\"losingUser\":$WINNER_USER_ID,\"winningCard\":$WINNER_OWNERSHIP_ID,\"losingCard\":$WINNER_OWNERSHIP_ID}"
+```
+
+To check a 403, submit the same valid result body using a **third user's** token; there must
+be no inserted result. To check a 404, use a participant's token but use a nonexistent
+ownership ID or one belonging to the wrong player. A missing positive battle ID returns 404;
+negative, nonnumeric, or IDs above 2147483647 return 400.
+
+### Read-only database checks
+
+```sql
+-- Replace 1 with the returned battle ID.
+SELECT id, winninguser, losinguser, winningcard, losingcard FROM public."Wins" WHERE id = 1;
+
+-- Confirm each still-existing inventory copy belongs to the stated player.
+-- LEFT JOIN preserves history even after inventory deletion.
+SELECT w.id, w.winninguser, winner.userid AS winning_copy_owner,
+       w.losinguser, loser.userid AS losing_copy_owner,
+       w.winningcard, w.losingcard
+FROM public."Wins" w
+LEFT JOIN public."User_owns_card" winner ON winner.id = w.winningcard
+LEFT JOIN public."User_owns_card" loser ON loser.id = w.losingcard
+ORDER BY w.id;
+
+-- Compare with the userId-filtered API total, replacing 1 with the player ID.
+SELECT COUNT(*) FROM public."Wins" WHERE winninguser = 1 OR losinguser = 1;
+SELECT COUNT(*) AS wins FROM public."Wins" WHERE winninguser = 1;
+SELECT COUNT(*) AS losses FROM public."Wins" WHERE losinguser = 1;
+```
+
+Creating a result will make that user's profile deletion return 409 while the result still
+references them. There is intentionally no new battle delete route. Do manual result creation
+against development data; automated tests do not connect to Railway or modify real results.
+
 ## User routes: profiles, administration, stats, and safe deletion
 
 All six former `UsersController` TODOs are implemented. The existing Google sign-in and

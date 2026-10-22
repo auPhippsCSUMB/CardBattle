@@ -3,7 +3,7 @@ info:
   title: CardBattle API
   version: 1.0.0
   description: |
-    Implemented card, deck management/membership, inventory management, Google authentication, and display-name routes.
+    Implemented card, deck management/membership, inventory management, battle history/result recording, Google authentication, and user/profile routes.
     Other controller TODOs are excluded until implemented. All routes except health
     require a verified Google ID token. Errors are described by status code; the
     application does not currently guarantee a uniform error response body.
@@ -21,10 +21,89 @@ tags:
   - name: Authentication
     description: Google identity verification and backend user registration.
   - name: Users
-    description: The signed-in user's profile.
+    description: Profiles, database-admin management, and user statistics.
+  - name: Battles
+    description: Authenticated history lookup and participant-reported battle results; not a server-side battle engine.
   - name: Health
     description: Service health.
 paths:
+  /api/v1/battles:
+    get:
+      tags: [Battles]
+      operationId: listBattles
+      summary: List battle history
+      description: Any valid Google token can read history. Optional userId matches either player before pagination. Fixed ascending battle-ID order; no timestamp sort. No matches or out-of-range pages return empty content. Deleted inventory references remain null. A legacy row missing a player returns 409 if included in the requested page.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: userId
+          in: query
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        '200':
+          description: Matching battle page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BattlePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [Battles]
+      operationId: createBattle
+      summary: Record a participant-reported battle result
+      description: Requires a registered caller who is one of two different players. Both users must exist. winningCard and losingCard are User_owns_card IDs, not Card IDs, and each copy must belong to the corresponding player and reference an existing Card. Does not run combat, verify the reported outcome, require a deck, award rewards, or prevent duplicate submissions. Repeated POSTs create separate results and affect statistics again. Client-reported outcomes are not suitable for authoritative competitive rankings. Unknown fields are ignored. occurredAt remains null because Wins has no timestamp column.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BattleCreate'
+      responses:
+        '201':
+          $ref: '#/components/responses/Battle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/battles/{battleId}:
+    get:
+      tags: [Battles]
+      operationId: getBattle
+      summary: Get one battle result
+      description: Any valid Google token can read a result. Missing battles return 404. Deleted inventory references return null. A legacy result missing a player returns 409 rather than a fabricated user ID.
+      parameters:
+        - name: battleId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        '200':
+          $ref: '#/components/responses/Battle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/inventory:
     get:
       tags: [Inventory]
@@ -768,6 +847,65 @@ components:
         enum: ['name,asc', 'name,desc', 'id,asc', 'id,desc', 'type,asc', 'type,desc']
         default: 'name,asc'
   schemas:
+    Battle:
+      type: object
+      required: [id, winningUser, losingUser, winningCard, losingCard, occurredAt]
+      properties:
+        id:
+          type: integer
+          format: int32
+        winningUser:
+          type: integer
+          format: int32
+        losingUser:
+          type: integer
+          format: int32
+        winningCard:
+          type: integer
+          format: int32
+          nullable: true
+          description: Winning inventory ownership ID, or null after deletion.
+        losingCard:
+          type: integer
+          format: int32
+          nullable: true
+          description: Losing inventory ownership ID, or null after deletion.
+        occurredAt:
+          type: string
+          nullable: true
+          description: Always null; there is no timestamp column in Wins.
+    BattleCreate:
+      type: object
+      required: [winningUser, losingUser, winningCard, losingCard]
+      properties:
+        winningUser:
+          type: integer
+          format: int32
+          minimum: 1
+        losingUser:
+          type: integer
+          format: int32
+          minimum: 1
+        winningCard:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Inventory ownership ID belonging to winningUser, not the shared Card ID.
+        losingCard:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Inventory ownership ID belonging to losingUser, not the shared Card ID.
+    BattlePage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/Battle'
+        page:
+          $ref: '#/components/schemas/PageMeta'
     OwnershipPatch:
       type: object
       description: Empty object is a no-op. Only value is editable; explicit null is invalid.
@@ -1066,6 +1204,12 @@ components:
           type: string
           description: Trimmed and rejected if blank.
   responses:
+    Battle:
+      description: Saved or requested battle result.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Battle'
     Card:
       description: The requested or updated card.
       content:
@@ -1115,8 +1259,8 @@ components:
     Unauthorized:
       description: Missing, expired, or otherwise invalid Google token.
     Forbidden:
-      description: The registered caller lacks permission; admin checks use the stored database flag.
+      description: The registered caller lacks permission. Admin checks use the stored database flag; battle creation requires the caller to be a participant.
     NotFound:
-      description: Card/deck/user/inventory/entry not found, no random-card match, or the caller is not the author/owner for a private action.
+      description: Card/deck/user/inventory/entry/battle not found, no random-card match, or the caller is not the author/owner for a private action. Battle creation also uses this for an unregistered caller, missing player, or missing/mismatched inventory copy.
     Conflict:
-      description: A database constraint prevents the operation (including user deletion blocked by linked game data), or a legacy deck/inventory entry cannot resolve its inventory/card/author reference.
+      description: A database constraint prevents the operation (including user deletion blocked by linked game data), a legacy deck/inventory entry cannot resolve its reference, or a legacy battle has a null player reference.

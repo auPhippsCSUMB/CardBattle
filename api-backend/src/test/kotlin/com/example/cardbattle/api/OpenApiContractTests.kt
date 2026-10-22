@@ -6,6 +6,9 @@ import com.example.cardbattle.api.dataObjects.CardType
 import com.example.cardbattle.api.controller.DecksController
 import com.example.cardbattle.api.controller.InventoryController
 import com.example.cardbattle.api.controller.UsersController
+import com.example.cardbattle.api.controller.BattlesController
+import com.example.cardbattle.api.dataObjects.BattleResponse
+import com.example.cardbattle.api.dataObjects.BattleCreateRequest
 import com.example.cardbattle.api.user.UserController
 import com.example.cardbattle.api.dataObjects.UserResponse
 import com.example.cardbattle.api.dataObjects.OwnershipResponse
@@ -29,6 +32,35 @@ import kotlin.test.assertFalse
 class OpenApiContractTests {
     private val document: Map<String, Any> =
         Yaml().load(Files.readString(Path.of("../docs/openapi.yaml")))
+
+    @Test
+    fun `documented battle operations match the controller and schemas`() {
+        val controller = BattlesController::class.java
+        val base = controller.getAnnotation(RequestMapping::class.java).value.single()
+        val expected = controller.declaredMethods.flatMap { method ->
+            listOfNotNull(
+                method.getAnnotation(GetMapping::class.java)?.let { base + it.value.firstOrNull().orEmpty() to "get" },
+                method.getAnnotation(PostMapping::class.java)?.let { base + it.value.firstOrNull().orEmpty() to "post" },
+            )
+        }.toSet()
+        val paths = document["paths"] as Map<*, *>
+        val actual = paths.entries.filter { it.key.toString().startsWith(base) }.flatMap { (path, operations) ->
+            (operations as Map<*, *>).keys.filter { it in setOf("get", "post", "put", "patch", "delete") }
+                .map { path.toString() to it.toString() }
+        }.toSet()
+        assertEquals(expected, actual)
+        val schemas = (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
+        val battle = (schemas["Battle"] as Map<*, *>)["properties"] as Map<*, *>
+        assertEquals(BattleResponse::class.primaryConstructor!!.parameters.map { it.name }.toSet(), battle.keys)
+        for (field in listOf("winningCard", "losingCard", "occurredAt")) {
+            assertEquals(true, (battle[field] as Map<*, *>)["nullable"])
+        }
+        val create = schemas["BattleCreate"] as Map<*, *>
+        assertEquals(BattleCreateRequest::class.primaryConstructor!!.parameters.map { it.name }.toSet(),
+            (create["properties"] as Map<*, *>).keys)
+        assertEquals(setOf("winningUser", "losingUser", "winningCard", "losingCard"),
+            (create["required"] as List<*>).toSet())
+    }
 
     @Test
     fun `documented user operations match both controllers and expose only supported fields`() {
