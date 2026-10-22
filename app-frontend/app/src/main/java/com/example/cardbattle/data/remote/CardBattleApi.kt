@@ -10,8 +10,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 
-//private const val DEFAULT_BACKEND_URL = "https://cardbattle-e5vf.onrender.com"
-private const val DEFAULT_BACKEND_URL = "http://10.0.2.2:8080"
+private const val DEFAULT_BACKEND_URL = "https://cardbattle-e5vf.onrender.com"
+//private const val DEFAULT_BACKEND_URL = "http://10.0.2.2:8080"
 
 suspend fun verifyWithBackend(idToken: String): Boolean =
     withContext(Dispatchers.IO) {
