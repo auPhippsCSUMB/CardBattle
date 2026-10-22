@@ -11,6 +11,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,281 +20,363 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.*
 import androidx.compose.ui.input.pointer.*
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.cardbattle.data.local.LocalCard
-import com.example.cardbattle.data.local.LocalDeck
+import com.example.cardbattle.data.remote.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private const val CARD_MIME =
-    "application/vnd.cardbattle.card-id"
+    "application/vnd.cardbattle.inventory-id"
 
 class DeckEditorState {
-    var deckSlot by mutableStateOf<Int?>(null)
+    var isOpen by mutableStateOf(false)
+    var serverDeck by mutableStateOf<ApiDeck?>(null)
     var name by mutableStateOf("")
     var activeSlot by mutableIntStateOf(0)
     var busy by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
 
-    val cardIds = mutableStateListOf<String?>(null, null, null)
+    val slots = mutableStateListOf<ApiInventoryEntry?>(
+        null, null, null
+    )
 
-    val isOpen: Boolean
-        get() = deckSlot != null
-
-    fun open(slot: Int, deck: LocalDeck?) {
-        deckSlot = slot
-        name = deck?.name ?: "Deck ${slot + 1}"
-
-        repeat(3) {
-            cardIds[it] = deck?.cardIds?.getOrNull(it)
+    fun open(
+        deck: ApiDeck?,
+        entries: List<ApiDeckEntry>,
+        inventory: List<ApiInventoryEntry>,
+    ) {
+        require(entries.size <= 3) {
+            "This deck contains more than three cards."
         }
 
-        activeSlot = cardIds.indexOfFirst { it == null }
+        val resolved = entries.map { entry ->
+            requireNotNull(
+                inventory.firstOrNull { it.id == entry.inventoryId }
+            ) {
+                "A deck entry references a copy missing from your inventory."
+            }
+        }
+
+        serverDeck = deck
+        name = deck?.name ?: "New deck"
+
+        repeat(3) {
+            slots[it] = resolved.getOrNull(it)
+        }
+
+        activeSlot = slots.indexOfFirst { it == null }
             .takeIf { it >= 0 } ?: 0
 
         error = null
+        isOpen = true
     }
 
     fun close() {
         if (!busy) {
-            deckSlot = null
+            isOpen = false
             error = null
         }
     }
 
-    fun addCard(id: String, target: Int = activeSlot): Boolean {
+    fun addCard(
+        copy: ApiInventoryEntry,
+        target: Int = activeSlot,
+    ): Boolean {
         if (!isOpen || busy || target !in 0..2) return false
 
-        if (cardIds.withIndex().any {
-                it.value == id && it.index != target
+        if (slots.withIndex().any {
+                it.index != target && it.value?.id == copy.id
             }) {
-            error = "That card is already in this deck."
+            error = "That owned copy is already in this deck."
             return false
         }
 
-        cardIds[target] = id
-        activeSlot = cardIds.indexOfFirst { it == null }
+        slots[target] = copy
+
+        activeSlot = slots.indexOfFirst { it == null }
             .takeIf { it >= 0 } ?: target
+
         error = null
         return true
     }
 
     fun removeCard(index: Int) {
         if (!busy) {
-            cardIds[index] = null
+            slots[index] = null
             activeSlot = index
             error = null
+        }
+    }
+
+    suspend fun save(
+        api: CardBattleClient,
+        userId: Long,
+    ) {
+        val chosen = slots.filterNotNull()
+
+        require(chosen.size == 3) {
+            "Fill all three card slots."
+        }
+        require(chosen.map { it.id }.distinct().size == 3) {
+            "Choose three different owned copies."
+        }
+        require(chosen.all { it.card != null }) {
+            "One of these cards is missing its details."
+        }
+
+        val trimmedName = name.trim()
+        require(trimmedName.length in 1..150) {
+            "Deck names must contain 1–150 characters."
+        }
+
+        val saved = serverDeck ?: api.createDeck(trimmedName).also {
+
+            serverDeck = it
+        }
+
+        if (saved.name != trimmedName) {
+            serverDeck = api.renameDeck(saved.id, trimmedName)
+        }
+
+        val existing = api.deckEntries(saved.id)
+
+        if (
+            existing.map { it.inventoryId } ==
+            chosen.map { it.id }
+        ) {
+            existing.zip(chosen).forEach { (entry, copy) ->
+                val type = checkNotNull(copy.card).type
+
+                if (entry.type != type) {
+                    api.updateDeckEntryClass(
+                        deckId = saved.id,
+                        membershipId = entry.id,
+                        type = type,
+                    )
+                }
+            }
+        } else {
+            existing.forEach { entry ->
+                api.removeDeckEntry(
+                    deckId = saved.id,
+                    membershipId = entry.id,
+                )
+            }
+
+            chosen.forEach { copy ->
+                api.addDeckEntry(
+                    deckId = saved.id,
+                    inventoryId = copy.id,
+                    userId = userId,
+                    type = checkNotNull(copy.card).type,
+                )
+            }
         }
     }
 }
 
 @Composable
 fun DeckSection(
-    cards: List<LocalCard>,
+    api: CardBattleClient,
+    userId: Long,
+    decks: List<ApiDeck>,
+    inventory: List<ApiInventoryEntry>,
     editor: DeckEditorState,
-    loadDecks: suspend () -> List<LocalDeck>,
-    onSaveDeck: suspend (LocalDeck) -> Unit,
-    onDeleteDeck: suspend (Int) -> Unit,
+    onChanged: () -> Unit,
 ) {
-    var decks by remember {
-        mutableStateOf<List<LocalDeck>>(emptyList())
-    }
-    var loading by remember { mutableStateOf(true) }
-    var loadError by remember { mutableStateOf(false) }
-    var reload by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
     var confirmDelete by remember { mutableStateOf(false) }
 
-    val scope = rememberCoroutineScope()
-    val currentLoader by rememberUpdatedState(loadDecks)
+    fun perform(action: suspend () -> Unit) {
+        if (editor.busy) return
 
-    LaunchedEffect(reload) {
-        loading = true
-        loadError = false
+        editor.busy = true
+        editor.error = null
 
-        try {
-            decks = currentLoader()
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            loadError = true
-        } finally {
-            loading = false
+        scope.launch {
+            try {
+                action()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                editor.error = cardApiError(failure)
+            } finally {
+                editor.busy = false
+            }
         }
+    }
+
+    fun finish() {
+        editor.busy = false
+        editor.close()
+        onChanged()
     }
 
     BackHandler(enabled = editor.isOpen) {
-        editor.close()
+        if (!editor.busy) {
+            editor.close()
+            onChanged()
+        }
     }
 
-    when {
-        loading -> {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth()
-            )
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (editor.busy) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
         }
 
-        loadError -> {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Could not load decks.")
-                TextButton(onClick = { reload++ }) {
-                    Text("Retry")
-                }
-            }
-        }
-
-        !editor.isOpen -> {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
+        if (!editor.isOpen) {
+            LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                SavedDeckTile(
-                    title = "Starter Deck",
-                    subtitle = "Coming soon",
-                    symbol = "3 cards",
-                    modifier = Modifier.weight(1f),
-                    onClick = {},
-                )
-
-                repeat(2) { slot ->
-                    val deck = decks.firstOrNull {
-                        it.slot == slot
-                    }
-
-                    SavedDeckTile(
-                        title = deck?.name ?: "New deck",
-                        subtitle = if (deck == null) {
-                            "Empty"
-                        } else {
-                            "Tap to edit"
-                        },
-                        symbol = if (deck == null) "+" else "3 cards",
-                        modifier = Modifier.weight(1f),
-                        onClick = { editor.open(slot, deck) },
+                item {
+                    DeckTile(
+                        title = "Starter Deck",
+                        subtitle = "Coming soon",
+                        enabled = false,
+                        onClick = {},
                     )
                 }
-            }
-        }
 
-        else -> {
-            val existing = decks.firstOrNull {
-                it.slot == editor.deckSlot
-            }
+                items(decks, key = { it.id }) { deck ->
+                    DeckTile(
+                        title = deck.name,
+                        subtitle = "Tap to edit",
+                        enabled = !editor.busy,
+                        onClick = {
+                            perform {
+                                val current = api.getDeck(deck.id)
+                                val entries = api.deckEntries(deck.id)
 
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    value = editor.name,
-                    onValueChange = {
-                        if (it.length <= 40) editor.name = it
-                    },
-                    label = { Text("Deck name") },
-                    singleLine = true,
-                    enabled = !editor.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                                editor.open(
+                                    current,
+                                    entries,
+                                    inventory,
+                                )
+                            }
+                        },
+                    )
+                }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    repeat(3) { index ->
-                        DeckCardSlot(
-                            index = index,
-                            card = cards.firstOrNull {
-                                it.id == editor.cardIds[index]
+                repeat(maxOf(1, 2 - decks.size)) {
+                    item {
+                        DeckTile(
+                            title = "New deck",
+                            subtitle = "+",
+                            enabled = !editor.busy,
+                            onClick = {
+                                editor.open(
+                                    deck = null,
+                                    entries = emptyList(),
+                                    inventory = inventory,
+                                )
                             },
-                            cards = cards,
-                            editor = editor,
-                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
+            }
+        } else {
+            OutlinedTextField(
+                value = editor.name,
+                onValueChange = {
+                    if (it.length <= 150) editor.name = it
+                },
+                label = { Text("Deck name") },
+                singleLine = true,
+                enabled = !editor.busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-                Text(
-                    text = "Select a slot, then tap or right-click a card. " +
-                            "You can also long-press and drag a card into a slot.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                editor.error?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                repeat(3) { index ->
+                    DeckCardSlot(
+                        index = index,
+                        api = api,
+                        inventory = inventory,
+                        editor = editor,
+                        modifier = Modifier.weight(1f),
                     )
                 }
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            Text(
+                "Select a slot, then tap or right-click a card. " +
+                        "You can also long-press and drag it into a slot.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                TextButton(
+                    enabled = !editor.busy,
+                    onClick = {
+                        editor.close()
+                        onChanged()
+                    },
                 ) {
-                    TextButton(
-                        onClick = { editor.close() },
-                        enabled = !editor.busy,
-                    ) {
-                        Text("Cancel")
-                    }
+                    Text("Cancel")
+                }
 
-                    if (existing != null) {
-                        TextButton(
-                            onClick = { confirmDelete = true },
-                            enabled = !editor.busy,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor =
-                                    MaterialTheme.colorScheme.error
-                            ),
-                        ) {
-                            Text("Delete")
+                TextButton(
+                    enabled = !editor.busy && inventory.size >= 3,
+                    onClick = {
+                        val choices = inventory.shuffled().take(3)
+
+                        repeat(3) {
+                            editor.slots[it] = choices[it]
                         }
-                    }
 
-                    Spacer(Modifier.weight(1f))
+                        editor.error = null
+                    },
+                ) {
+                    Text("Randomize")
+                }
 
-                    Button(
-                        enabled = !editor.busy &&
-                                editor.name.isNotBlank() &&
-                                editor.cardIds.all { id ->
-                                    id != null && cards.any { it.id == id }
-                                } &&
-                                editor.cardIds.distinct().size == 3,
-                        onClick = {
-                            val deck = LocalDeck(
-                                slot = checkNotNull(editor.deckSlot),
-                                name = editor.name.trim(),
-                                cardIds = editor.cardIds.filterNotNull(),
-                            )
-
-                            editor.busy = true
-                            editor.error = null
-
-                            scope.launch {
-                                try {
-                                    onSaveDeck(deck)
-
-                                    decks = decks.filterNot {
-                                        it.slot == deck.slot
-                                    } + deck
-
-                                    editor.busy = false
-                                    editor.close()
-                                } catch (error: CancellationException) {
-                                    throw error
-                                } catch (error: Exception) {
-                                    editor.error =
-                                        "Could not save the deck. Try again."
-                                } finally {
-                                    editor.busy = false
-                                }
-                            }
-                        },
+                if (editor.serverDeck != null) {
+                    TextButton(
+                        enabled = !editor.busy,
+                        onClick = { confirmDelete = true },
                     ) {
-                        Text(if (editor.busy) "Saving…" else "Save")
+                        Text("Delete")
                     }
                 }
+            }
+
+            Button(
+                enabled = !editor.busy &&
+                        editor.name.trim().length in 1..150 &&
+                        editor.slots.all { it != null },
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    perform {
+                        editor.save(api, userId)
+                        finish()
+                    }
+                },
+            ) {
+                Text(if (editor.busy) "Saving…" else "Save deck")
+            }
+        }
+
+        editor.error?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            if (editor.isOpen) {
+                Text(
+                    "Some requests may already have saved. " +
+                            "Retry Save to apply this layout again.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
@@ -307,9 +391,8 @@ fun DeckSection(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        "Delete this deck? Its cards will stay in your collection."
-                    )
+                    Text("Its cards will stay in your collection.")
+
                     editor.error?.let {
                         Text(
                             it,
@@ -322,27 +405,13 @@ fun DeckSection(
                 TextButton(
                     enabled = !editor.busy,
                     onClick = {
-                        val slot = checkNotNull(editor.deckSlot)
-                        editor.busy = true
-                        editor.error = null
+                        perform {
+                            api.deleteDeck(
+                                checkNotNull(editor.serverDeck).id
+                            )
 
-                        scope.launch {
-                            try {
-                                onDeleteDeck(slot)
-                                decks = decks.filterNot {
-                                    it.slot == slot
-                                }
-                                confirmDelete = false
-                                editor.busy = false
-                                editor.close()
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (error: Exception) {
-                                editor.error =
-                                    "Could not delete the deck. Try again."
-                            } finally {
-                                editor.busy = false
-                            }
+                            confirmDelete = false
+                            finish()
                         }
                     },
                 ) {
@@ -362,41 +431,28 @@ fun DeckSection(
 }
 
 @Composable
-private fun SavedDeckTile(
+private fun DeckTile(
     title: String,
     subtitle: String,
-    symbol: String,
-    modifier: Modifier,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
     Card(
         onClick = onClick,
-        modifier = modifier.heightIn(min = 120.dp),
-        shape = RoundedCornerShape(16.dp),
+        enabled = enabled,
+        modifier = Modifier
+            .width(120.dp)
+            .heightIn(min = 110.dp),
     ) {
         Column(
-            modifier = Modifier
+            Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 16.dp),
+                .padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                symbol,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                title,
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-            )
+            Text(title, textAlign = TextAlign.Center)
+            Text(subtitle, textAlign = TextAlign.Center)
         }
     }
 }
@@ -404,46 +460,39 @@ private fun SavedDeckTile(
 @Composable
 private fun DeckCardSlot(
     index: Int,
-    card: LocalCard?,
-    cards: List<LocalCard>,
+    api: CardBattleClient,
+    inventory: List<ApiInventoryEntry>,
     editor: DeckEditorState,
     modifier: Modifier,
 ) {
-    var hovering by remember { mutableStateOf(false) }
+    val copy = editor.slots[index]
 
-    val acceptDrop by rememberUpdatedState<(String) -> Boolean>(
+    val acceptDrop by rememberUpdatedState<(Long) -> Boolean>(
         { id ->
-            if (cards.any { it.id == id }) {
-                editor.addCard(id, index)
-            } else {
+            val owned = inventory.firstOrNull { it.id == id }
+
+            if (owned == null) {
                 false
+            } else {
+                editor.addCard(owned, index)
             }
         }
     )
 
     val target = remember(index, editor) {
         object : DragAndDropTarget {
-            override fun onEntered(event: DragAndDropEvent) {
-                hovering = true
-            }
-
-            override fun onExited(event: DragAndDropEvent) {
-                hovering = false
-            }
-
-            override fun onEnded(event: DragAndDropEvent) {
-                hovering = false
-            }
-
-            override fun onDrop(event: DragAndDropEvent): Boolean {
-                hovering = false
-
+            override fun onDrop(
+                event: DragAndDropEvent,
+            ): Boolean {
                 val clip = event.toAndroidDragEvent().clipData
                     ?: return false
 
                 if (clip.itemCount != 1) return false
 
-                val id = clip.getItemAt(0).text?.toString()
+                val id = clip.getItemAt(0)
+                    .text
+                    ?.toString()
+                    ?.toLongOrNull()
                     ?: return false
 
                 return acceptDrop(id)
@@ -456,20 +505,16 @@ private fun DeckCardSlot(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            modifier = Modifier
+            Modifier
                 .fillMaxWidth()
-                .height(160.dp)
+                .heightIn(min = 160.dp)
                 .border(
-                    width = if (
-                        hovering || editor.activeSlot == index
-                    ) 3.dp else 1.dp,
-                    color = if (
-                        hovering || editor.activeSlot == index
-                    ) {
-                        MaterialTheme.colorScheme.primary
+                    width = if (editor.activeSlot == index) {
+                        3.dp
                     } else {
-                        MaterialTheme.colorScheme.outline
+                        1.dp
                     },
+                    color = MaterialTheme.colorScheme.primary,
                     shape = RoundedCornerShape(12.dp),
                 )
                 .dragAndDropTarget(
@@ -478,14 +523,18 @@ private fun DeckCardSlot(
                     },
                     target = target,
                 )
-                .padding(6.dp),
+                .padding(5.dp),
             contentAlignment = Alignment.Center,
         ) {
+            val card = copy?.card
+
             if (card == null) {
                 TextButton(
-                    onClick = { editor.activeSlot = index },
                     enabled = !editor.busy,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp),
+                    onClick = { editor.activeSlot = index },
                 ) {
                     Text(
                         "+",
@@ -495,17 +544,16 @@ private fun DeckCardSlot(
             } else {
                 CollectionCard(
                     card = card,
-                    onClick = {
-                        if (!editor.busy) editor.activeSlot = index
-                    },
+                    api = api,
+                    enabled = !editor.busy,
+                    onClick = { editor.activeSlot = index },
                 )
             }
         }
 
         TextButton(
+            enabled = copy != null && !editor.busy,
             onClick = { editor.removeCard(index) },
-            enabled = card != null && !editor.busy,
-            contentPadding = PaddingValues(4.dp),
         ) {
             Text("Remove")
         }
@@ -514,7 +562,7 @@ private fun DeckCardSlot(
 
 @Composable
 fun Modifier.deckCardGestures(
-    cardId: String,
+    copy: ApiInventoryEntry,
     editor: DeckEditorState,
 ): Modifier {
     if (!editor.isOpen || editor.busy) return this
@@ -523,13 +571,13 @@ fun Modifier.deckCardGestures(
         .dragAndDropSource { _ ->
             DragAndDropTransferData(
                 clipData = ClipData(
-                    "CardBattle card",
+                    "CardBattle owned card",
                     arrayOf(CARD_MIME),
-                    ClipData.Item(cardId),
+                    ClipData.Item(copy.id.toString()),
                 )
             )
         }
-        .pointerInput(cardId, editor) {
+        .pointerInput(copy, editor) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -539,7 +587,7 @@ fun Modifier.deckCardGestures(
                         event.buttons.isSecondaryPressed
                     ) {
                         event.changes.forEach { it.consume() }
-                        editor.addCard(cardId)
+                        editor.addCard(copy)
                     }
                 }
             }
