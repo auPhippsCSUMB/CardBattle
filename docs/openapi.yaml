@@ -3,7 +3,7 @@ info:
   title: CardBattle API
   version: 1.0.0
   description: |
-    Implemented card, deck management/membership, inventory creation/listing, Google authentication, and display-name routes.
+    Implemented card, deck management/membership, inventory management, Google authentication, and display-name routes.
     Other controller TODOs are excluded until implemented. All routes except health
     require a verified Google ID token. Errors are described by status code; the
     application does not currently guarantee a uniform error response body.
@@ -17,7 +17,7 @@ tags:
   - name: Decks
     description: Owner-only deck listing, creation, lookup, renaming, deletion, and membership management.
   - name: Inventory
-    description: Create and list the signed-in user's inventory copies.
+    description: Create, list, update, and delete the signed-in user's inventory copies.
   - name: Authentication
     description: Google identity verification and backend user registration.
   - name: Users
@@ -72,6 +72,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Ownership'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/inventory/{ownershipId}:
+    parameters:
+      - name: ownershipId
+        in: path
+        required: true
+        description: User_owns_card.id, not Card.id or Card_in_deck.id.
+        schema:
+          type: integer
+          format: int32
+    patch:
+      tags: [Inventory]
+      operationId: updateOwnership
+      summary: Change the value of an inventory copy owned by the signed-in user
+      description: Only value is editable. Empty or unknown-only objects are no-ops; null/negative values are rejected. Ownership and card references cannot be changed. Returns embedded card details. Broken legacy card references return 409 and roll back any update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnershipPatch'
+      responses:
+        '200':
+          description: Updated or unchanged inventory copy with embedded card details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ownership'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Inventory]
+      operationId: deleteOwnership
+      summary: Delete an inventory copy owned by the signed-in user
+      description: Deletes only this User_owns_card row. Existing foreign keys remove its deck memberships and set its winningcard/losingcard battle references to null. Decks, battle rows, users, other inventory copies, and the shared Card definition remain. A blocking constraint returns 409 and rolls everything back. Broken legacy copies can also be removed.
+      responses:
+        '204':
+          $ref: '#/components/responses/Deleted'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -582,6 +633,15 @@ components:
         enum: ['name,asc', 'name,desc', 'id,asc', 'id,desc', 'type,asc', 'type,desc']
         default: 'name,asc'
   schemas:
+    OwnershipPatch:
+      type: object
+      description: Empty object is a no-op. Only value is editable; explicit null is invalid.
+      properties:
+        value:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 2147483647
     Ownership:
       type: object
       required: [id, userId, cardId, value, card]

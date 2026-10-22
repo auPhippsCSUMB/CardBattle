@@ -63,19 +63,34 @@ class OpenApiContractTests {
     }
 
     @Test
-    fun `documented inventory operations include only create and list and embed card details`() {
+    fun `documented inventory operations match the implemented controller and embed card details`() {
         val paths = document["paths"] as Map<*, *>
-        val operations = paths["/api/v1/inventory"] as Map<*, *>
-        assertEquals(setOf("get", "post"), operations.keys)
-        val methods = InventoryController::class.java.declaredMethods
-        assertEquals("createOwnership", methods.single { it.getAnnotation(PostMapping::class.java) != null }.name)
-        assertEquals("listInventory", methods.single { it.getAnnotation(GetMapping::class.java) != null }.name)
+        val controller = InventoryController::class.java
+        val basePath = controller.getAnnotation(RequestMapping::class.java).value.single()
+        val expected = controller.declaredMethods.flatMap { method ->
+            listOfNotNull(
+                method.getAnnotation(GetMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "get" },
+                method.getAnnotation(PostMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "post" },
+                method.getAnnotation(PatchMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "patch" },
+                method.getAnnotation(DeleteMapping::class.java)?.let { basePath + it.value.firstOrNull().orEmpty() to "delete" },
+            )
+        }.toSet()
+        val documented = paths.entries.filter { (path, _) -> path.toString().startsWith(basePath) }
+            .flatMap { (path, operations) ->
+                (operations as Map<*, *>).keys
+                    .filter { it in setOf("get", "post", "patch", "delete", "put") }
+                    .map { path.toString() to it.toString() }
+            }.toSet()
+        assertEquals(expected, documented)
         val schemas = (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
         val ownership = schemas["Ownership"] as Map<*, *>
         val fields = ownership["properties"] as Map<*, *>
         assertEquals(OwnershipResponse::class.primaryConstructor!!.parameters.map { it.name }.toSet(), fields.keys)
         assertEquals("#/components/schemas/Card", (fields["card"] as Map<*, *>)["\$ref"])
         assertEquals(true, (fields["value"] as Map<*, *>)["nullable"])
+        val patch = schemas["OwnershipPatch"] as Map<*, *>
+        assertFalse(patch.containsKey("minProperties"), "Empty inventory PATCH is a no-op")
+        assertEquals(setOf("value"), (patch["properties"] as Map<*, *>).keys)
     }
 
     @Test

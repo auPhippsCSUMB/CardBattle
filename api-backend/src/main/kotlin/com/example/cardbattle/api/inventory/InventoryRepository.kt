@@ -49,6 +49,16 @@ class InventoryRepository(private val jdbc: JdbcTemplate) {
         "$selection WHERE owned.id = ? AND owned.userid = ?", mapper, id, userId,
     ).firstOrNull()
 
+    fun updateValue(id: Int, userId: Int, value: Int): Int = jdbc.update(
+        """UPDATE public."User_owns_card" SET "value" = ? WHERE id = ? AND userid = ?""",
+        value, id, userId,
+    )
+
+    // Existing foreign keys remove deck memberships and null battle-card references.
+    fun delete(id: Int, userId: Int): Int = jdbc.update(
+        """DELETE FROM public."User_owns_card" WHERE id = ? AND userid = ?""", id, userId,
+    )
+
     fun findPage(userId: Int, type: CardType?, size: Int, offset: Long): List<InventoryEntry> {
         val typeFilter = if (type == null) "" else " AND card.type = ?"
         val parameters = mutableListOf<Any>(userId)

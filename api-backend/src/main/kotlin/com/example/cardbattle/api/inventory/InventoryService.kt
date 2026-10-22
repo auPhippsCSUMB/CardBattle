@@ -4,6 +4,7 @@ import com.example.cardbattle.api.card.CardRepository
 import com.example.cardbattle.api.dataObjects.CardType
 import com.example.cardbattle.api.dataObjects.OwnershipCreateRequest
 import com.example.cardbattle.api.dataObjects.OwnershipResponse
+import com.example.cardbattle.api.dataObjects.OwnershipPatchRequest
 import com.example.cardbattle.api.dataObjects.PageMeta
 import com.example.cardbattle.api.dataObjects.PageResponse
 import com.example.cardbattle.api.user.UserRepository
@@ -23,8 +24,9 @@ class InventoryService(
     fun createOwnership(request: OwnershipCreateRequest, googleSubject: String): OwnershipResponse {
         val value = request.value
             ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Value is required")
-        if (value < 0 || request.cardId !in 1..Int.MAX_VALUE.toLong()) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Value must be nonnegative and card ID must be a positive 32-bit integer")
+        validateValue(value)
+        if (request.cardId !in 1..Int.MAX_VALUE.toLong()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Card ID must be a positive 32-bit integer")
         }
         val owner = users.findByGoogleSubject(googleSubject)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Sign in through Google before adding inventory")
@@ -64,6 +66,45 @@ class InventoryService(
             content = entries.map { toResponse(it) },
             page = PageMeta(size, page, total, ((total + size - 1) / size).toInt()),
         )
+    }
+
+    @Transactional
+    fun updateOwnership(id: Int, request: OwnershipPatchRequest, googleSubject: String): OwnershipResponse {
+        val ownerId = currentUserId(googleSubject)
+        val entry = inventory.findByIdAndUserId(id, ownerId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Inventory entry not found")
+        if (!request.valueProvided) return toResponse(entry)
+        val value = request.value
+            ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Value cannot be null")
+        validateValue(value)
+        try {
+            if (inventory.updateValue(id, ownerId, value) == 0) {
+                throw ResponseStatusException(HttpStatus.NOT_FOUND, "Inventory entry not found")
+            }
+            return toResponse(entry.copy(value = value))
+        } catch (error: DataIntegrityViolationException) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "A database constraint prevents updating this inventory entry", error)
+        }
+    }
+
+    @Transactional
+    fun deleteOwnership(id: Int, googleSubject: String) {
+        val ownerId = currentUserId(googleSubject)
+        try {
+            // The owner predicate also protects copies if the ID came from another account.
+            if (inventory.delete(id, ownerId) == 0) {
+                throw ResponseStatusException(HttpStatus.NOT_FOUND, "Inventory entry not found")
+            }
+        } catch (error: DataIntegrityViolationException) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Other records still reference this inventory entry", error)
+        }
+    }
+
+    private fun currentUserId(googleSubject: String): Int = users.findByGoogleSubject(googleSubject)?.id
+        ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Inventory entry not found")
+
+    private fun validateValue(value: Int) {
+        if (value < 0) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Value must be nonnegative")
     }
 
     private fun toResponse(entry: InventoryEntry): OwnershipResponse {

@@ -7,7 +7,7 @@ security filter and Boot-configured decoder. It checks successful claims, missin
 tokens, expiration, wrong audience, wrong issuer, wrong signature, and public health access.
 These prove our validation behavior; they do not prove Google Console setup or Railway availability.
 
-## Inventory creation and listing
+## Inventory routes
 
 Run `bash ./gradlew test --tests '*InventoryRoutesTests'` for these routes or
 `bash ./gradlew verify` for all backend tests and service coverage checks.
@@ -38,7 +38,8 @@ Google verification. They do not connect to Railway or Render.
   get empty pages. Pages beyond the end retain the matching total with empty content.
 - Both routes require valid tokens (401 otherwise). Invalid input/parameters return
   400. Constraint conflicts and broken legacy card/author references return 409;
-  writes roll back. Inventory PATCH/DELETE remain TODOs for a future batch.
+  writes roll back. Inventory PATCH/DELETE are described below; every InventoryController
+  route is now implemented.
 
 Extra complexity: a small JDBC repository uses a joined card query for display,
 a matching count query for pagination, and generated-key retrieval for INSERT.
@@ -113,6 +114,83 @@ SELECT COUNT(*) AS matching_mages
 FROM public."User_owns_card" owned
 JOIN public."Card" card ON card.id = owned.cardid
 WHERE owned.userid = 1 AND card.type = 'MAGE';
+```
+
+### Updating and deleting inventory copies
+
+Both routes use `User_owns_card.id` as `ownershipId`, not the underlying Card ID.
+They require a valid token and ownership of the copy. Missing copies, other users'
+copies, and unregistered callers return 404; missing/invalid tokens return 401.
+Malformed or out-of-range path IDs return 400.
+
+- `PATCH /api/v1/inventory/{ownershipId}` accepts `{"value":12}`. Only value is
+  editable. It must be an integer from 0 through 2147483647. Explicit null, negative,
+  malformed, or oversized values return 400 without changing the row. `{}` or an
+  unknown-only object is a no-op; existing null values remain null until replaced
+  with a valid value. Ownership, card reference, and shared card details are immutable.
+  Successful PATCH returns 200 with the same embedded-card format as create/list.
+- `DELETE /api/v1/inventory/{ownershipId}` deletes only that copy and returns an
+  empty 204. Its Card_in_deck memberships cascade away; the Deck rows remain. Wins
+  rows remain, but winningcard/losingcard references to the removed copy become null.
+  Other copies, the shared Card (and its drawing), and users remain untouched.
+  Repeating DELETE returns 404. Broken legacy copies can still be deleted.
+- A blocking database constraint returns 409. The service transaction rolls back
+  changes, including cascaded deck-entry deletions and battle-reference updates.
+  A PATCH unable to resolve its legacy card reference also returns 409 and rolls back.
+
+Extra complexity stays small: PATCH tracks omitted vs null value, following the
+existing PATCH pattern and sharing create's nonnegative validation. SQL UPDATE/DELETE
+include both inventory ID and authenticated owner ID. Deletion relies on the existing
+CASCADE/SET NULL foreign keys; no new cleanup algorithm or schema migration was added.
+Tests cover multiple decks, multiple copies, both battle-card columns, and rollback
+with a restrictive test-only foreign key. No frontend deletion behavior was changed.
+
+```bash
+# Use your actual inventory-copy ID from createOwnership/listInventory.
+export OWNERSHIP_ID=101
+
+# Expect 200 with value 12 and embedded card details.
+curl -i -X PATCH "$BASE_URL/api/v1/inventory/$OWNERSHIP_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"value":12}'
+
+# Expect 200 with no changes.
+curl -i -X PATCH "$BASE_URL/api/v1/inventory/$OWNERSHIP_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
+
+# Expect 400 without changes.
+curl -i -X PATCH "$BASE_URL/api/v1/inventory/$OWNERSHIP_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"value":null}'
+
+# Expect 204. This deletes real inventory and its memberships in the configured DB.
+curl -i -X DELETE "$BASE_URL/api/v1/inventory/$OWNERSHIP_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+
+# Expect 404 when repeated.
+curl -i -X DELETE "$BASE_URL/api/v1/inventory/$OWNERSHIP_ID" \
+  -H "Authorization: Bearer $CARD_TOKEN"
+```
+
+Check before/after using your real IDs. After PATCH, only value changes. After DELETE,
+the copy and its deck entries disappear, but decks, the shared card, and battle rows
+remain. Record relevant battle IDs and their references before deleting, then query
+those same IDs afterward to confirm only the selected references became null.
+
+```sql
+-- Replace inventory ID 101, underlying Card ID 7, and affected Deck ID 123.
+SELECT id, userid, cardid, value FROM public."User_owns_card" WHERE id = 101;
+SELECT id, deckid, cardid FROM public."Card_in_deck" WHERE cardid = 101;
+SELECT id, winningcard, losingcard FROM public."Wins"
+WHERE winningcard = 101 OR losingcard = 101;
+
+-- These rows should still exist after deletion.
+SELECT id, name, author FROM public."Card" WHERE id = 7;
+SELECT id, userid, name FROM public."Deck" WHERE id = 123;
+
+-- Replace 301 with a battle ID recorded above; the row should remain after deletion.
+SELECT id, winningcard, losingcard FROM public."Wins" WHERE id = 301;
 ```
 
 ## Deck creation, lookup, and deletion

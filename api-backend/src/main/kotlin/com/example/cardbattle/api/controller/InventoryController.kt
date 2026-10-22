@@ -43,11 +43,17 @@ class InventoryController(private val inventoryService: InventoryService) {
 
     @PatchMapping("/{ownershipId}")
     fun updateOwnership(
-        @PathVariable ownershipId: Long,
-        @RequestBody request: OwnershipPatchRequest
-    ): OwnershipResponse = TODO("Implement PATCH /api/v1/inventory/{ownershipId}")
+        @PathVariable ownershipId: Int,
+        @RequestBody request: OwnershipPatchRequest,
+        authentication: JwtAuthenticationToken,
+    ): OwnershipResponse = inventoryService.updateOwnership(ownershipId, request, authentication.token.subject)
 
     @DeleteMapping("/{ownershipId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteOwnership(@PathVariable ownershipId: Long): Unit = TODO("Implement DELETE /api/v1/inventory/{ownershipId}")
+    fun deleteOwnership(
+        @PathVariable ownershipId: Int,
+        authentication: JwtAuthenticationToken,
+    ) {
+        inventoryService.deleteOwnership(ownershipId, authentication.token.subject)
+    }
 }

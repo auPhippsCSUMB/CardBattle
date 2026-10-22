@@ -1,5 +1,7 @@
 package com.example.cardbattle.api.dataObjects
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+
 data class OwnershipResponse(
     val id: Long,
     val userId: Long,
@@ -14,6 +16,14 @@ data class OwnershipCreateRequest(
     val value: Int?
 )
 
-data class OwnershipPatchRequest(
-    val value: Int? = null
-)
+class OwnershipPatchRequest {
+    @get:JsonIgnore
+    var valueProvided: Boolean = false
+        private set
+
+    var value: Int? = null
+        set(newValue) {
+            valueProvided = true
+            field = newValue
+        }
+}

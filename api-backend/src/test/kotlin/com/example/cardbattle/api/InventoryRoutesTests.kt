@@ -310,6 +310,224 @@ class InventoryRoutesTests {
         assertEquals(0, countOwned())
     }
 
+    @Test
+    fun `patch edits only the owned copy's value and returns embedded card details`() {
+        val owner = user()
+        val author = user("other-author")
+        val card = card(author)
+        seed(owner, card, 101)
+        mvc.perform(patchValue(101,
+            """{"value":12,"id":999,"userId":999,"cardId":999,"card":{"name":"Fake"}}"""))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.id").value(101))
+            .andExpect(jsonPath("$.userId").value(owner.id))
+            .andExpect(jsonPath("$.cardId").value(card.id))
+            .andExpect(jsonPath("$.value").value(12))
+            .andExpect(jsonPath("$.card.id").value(card.id))
+            .andExpect(jsonPath("$.card.authorId").value(author.id))
+            .andExpect(jsonPath("$.card.name").value("Test Card"))
+        assertEquals(12, storedValue(101))
+        assertEquals("Test Card", cards.findById(checkNotNull(card.id)).orElseThrow().name)
+        assertEquals(1, countOwned())
+    }
+
+    @Test
+    fun `empty patch preserves values including legacy null and null can be replaced with a valid value`() {
+        val owner = user()
+        seed(owner, card(owner), 101)
+        mvc.perform(patchValue(101, "{}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.value").value(5))
+        jdbc.update("""UPDATE public."User_owns_card" SET "value" = NULL WHERE id = 101""")
+        mvc.perform(patchValue(101, "{}"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.value").value(org.hamcrest.Matchers.nullValue()))
+        mvc.perform(patchValue(101, """{"value":10}"""))
+            .andExpect(status().isOk).andExpect(jsonPath("$.value").value(10))
+    }
+
+    @Test
+    fun `patch rejects invalid values and JSON without changing the entry`() {
+        val owner = user()
+        seed(owner, card(owner), 101)
+        for (body in listOf("{", "", """{"value":null}""", """{"value":-1}""",
+            """{"value":2147483648}""", """{"value":null,"valueProvided":false}""")) {
+            mvc.perform(patchValue(101, body)).andExpect(status().isBadRequest)
+            assertEquals(5, storedValue(101))
+        }
+    }
+
+    @Test
+    fun `patch accepts zero and the maximum integer and ignores unknown only patches`() {
+        val owner = user()
+        seed(owner, card(owner), 101)
+        for (value in listOf(0, Int.MAX_VALUE)) {
+            mvc.perform(patchValue(101, """{"value":$value}"""))
+                .andExpect(status().isOk).andExpect(jsonPath("$.value").value(value))
+        }
+        mvc.perform(patchValue(101, """{"cardId":999,"userId":999}"""))
+            .andExpect(status().isOk).andExpect(jsonPath("$.value").value(Int.MAX_VALUE))
+    }
+
+    @Test
+    fun `patch and delete cannot access another user's copy`() {
+        user()
+        val other = user("other-user")
+        seed(other, card(other), 101)
+        mvc.perform(patchValue(101, """{"value":12}""")).andExpect(status().isNotFound)
+        mvc.perform(deleteCopy(101)).andExpect(status().isNotFound)
+        assertEquals(1, countOwned())
+        assertEquals(5, storedValue(101))
+    }
+
+    @Test
+    fun `patch and delete return 404 for missing entries and unregistered callers`() {
+        val other = user("other-user")
+        seed(other, card(other), 101)
+        // The token's subject has not registered yet.
+        mvc.perform(patchValue(101, "{}")).andExpect(status().isNotFound)
+        mvc.perform(deleteCopy(101)).andExpect(status().isNotFound)
+        user()
+        mvc.perform(patchValue(Int.MAX_VALUE, "{}")).andExpect(status().isNotFound)
+        mvc.perform(deleteCopy(Int.MAX_VALUE)).andExpect(status().isNotFound)
+        assertEquals(1, countOwned())
+    }
+
+    @Test
+    fun `patch and delete reject malformed or out of range path IDs`() {
+        for (id in listOf("not-an-id", "2147483648")) {
+            mvc.perform(patch("/api/v1/inventory/$id").auth()
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest)
+            mvc.perform(delete("/api/v1/inventory/$id").auth()).andExpect(status().isBadRequest)
+        }
+    }
+
+    @Test
+    fun `patch and delete require valid tokens and leave inventory untouched`() {
+        val owner = user()
+        seed(owner, card(owner), 101)
+        for (token in listOf(null, "invalid-token")) {
+            val requests = listOf(
+                patch("/api/v1/inventory/101").contentType(MediaType.APPLICATION_JSON).content("""{"value":12}"""),
+                delete("/api/v1/inventory/101"),
+            )
+            for (request in requests) {
+                if (token != null) request.header("Authorization", "Bearer $token")
+                mvc.perform(request).andExpect(status().isUnauthorized)
+            }
+        }
+        assertEquals(1, countOwned())
+        assertEquals(5, storedValue(101))
+    }
+
+    @Test
+    fun `a database constraint blocking value updates returns 409 without changing the value`() {
+        val owner = user()
+        seed(owner, card(owner), 101)
+        jdbc.execute("""ALTER TABLE public."User_owns_card" ADD CONSTRAINT inventory_test_patch CHECK ("value" <> 12)""")
+        try {
+            mvc.perform(patchValue(101, """{"value":12}""")).andExpect(status().isConflict)
+            assertEquals(5, storedValue(101))
+        } finally {
+            jdbc.execute("""ALTER TABLE public."User_owns_card" DROP CONSTRAINT inventory_test_patch""")
+        }
+    }
+
+    @Test
+    fun `delete returns an empty 204 and removes inventory but preserves its card and user`() {
+        val owner = user()
+        val card = card(owner)
+        seed(owner, card, 101)
+        mvc.perform(deleteCopy(101)).andExpect(status().isNoContent).andExpect(content().string(""))
+        assertEquals(0, countOwned())
+        assertEquals(1L, users.count())
+        assertTrue(cards.existsById(checkNotNull(card.id)))
+        mvc.perform(deleteCopy(101)).andExpect(status().isNotFound)
+        mvc.perform(patchValue(101, "{}")).andExpect(status().isNotFound)
+        mvc.perform(get("/api/v1/inventory").auth()).andExpect(status().isOk)
+            .andExpect(jsonPath("$.content").isEmpty)
+    }
+
+    @Test
+    fun `delete cascades only this copy's memberships and nulls its battle references preserving decks and other copies`() {
+        val owner = user()
+        val opponent = user("opponent")
+        val card = card(owner)
+        seed(owner, card, 101)
+        seed(owner, card, 102)
+        seed(opponent, card, 103)
+        val firstDeck = decks.save(DeckEntity(name = "First Deck", user = owner))
+        val secondDeck = decks.save(DeckEntity(name = "Second Deck", user = owner))
+        jdbc.update("""INSERT INTO public."Card_in_deck" (id, cardid, deckid)
+            VALUES (201, 101, ?), (202, 102, ?), (203, 101, ?), (204, 103, ?)""",
+            firstDeck.id, firstDeck.id, secondDeck.id, secondDeck.id)
+        jdbc.update("""INSERT INTO public."Wins" (id, winninguser, losinguser, winningcard, losingcard)
+            VALUES (301, ?, ?, 101, 103), (302, ?, ?, 102, 101), (303, ?, ?, 101, 101)""",
+            owner.id, opponent.id, owner.id, opponent.id, owner.id, opponent.id)
+
+        mvc.perform(deleteCopy(101)).andExpect(status().isNoContent)
+        assertEquals(2, countOwned())
+        assertEquals(1L, cards.count())
+        assertEquals(2L, users.count())
+        assertEquals(2L, decks.count())
+        assertEquals(2, jdbc.queryForObject("""SELECT COUNT(*) FROM public."Card_in_deck" """, Int::class.java))
+        assertEquals(0, jdbc.queryForObject("""SELECT COUNT(*) FROM public."Card_in_deck" WHERE cardid = 101""", Int::class.java))
+        assertEquals(3, jdbc.queryForObject("""SELECT COUNT(*) FROM public."Wins" """, Int::class.java))
+        assertEquals(null, battleReference(301, "winningcard"))
+        assertEquals(103, battleReference(301, "losingcard"))
+        assertEquals(102, battleReference(302, "winningcard"))
+        assertEquals(null, battleReference(302, "losingcard"))
+        assertEquals(null, battleReference(303, "winningcard"))
+        assertEquals(null, battleReference(303, "losingcard"))
+    }
+
+    @Test
+    fun `a restrictive reference returns 409 and rolls back cascades and history changes`() {
+        val owner = user()
+        val card = card(owner)
+        seed(owner, card, 101)
+        seed(owner, card, 102)
+        val deck = decks.save(DeckEntity(name = "Keep Deck", user = owner))
+        jdbc.update("""INSERT INTO public."Card_in_deck" (id, cardid, deckid) VALUES (201, 101, ?)""", deck.id)
+        jdbc.update("""INSERT INTO public."Wins" (id, winninguser, losinguser, winningcard, losingcard)
+            VALUES (301, ?, ?, 101, 102)""", owner.id, owner.id)
+        jdbc.execute("CREATE TABLE inventory_test_reference (owned_id INTEGER REFERENCES public.\"User_owns_card\"(id))")
+        try {
+            jdbc.update("INSERT INTO inventory_test_reference (owned_id) VALUES (101)")
+            mvc.perform(deleteCopy(101)).andExpect(status().isConflict)
+            assertEquals(2, countOwned())
+            assertEquals(1, jdbc.queryForObject("""SELECT COUNT(*) FROM public."Card_in_deck" WHERE cardid = 101""", Int::class.java))
+            assertEquals(101, battleReference(301, "winningcard"))
+            assertEquals(102, battleReference(301, "losingcard"))
+        } finally {
+            jdbc.execute("DROP TABLE inventory_test_reference")
+        }
+    }
+
+    @Test
+    fun `broken legacy copies can be deleted while patch rolls back if it cannot return card details`() {
+        val owner = user()
+        jdbc.update("""INSERT INTO public."User_owns_card" (id, userid, "value") VALUES (101, ?, 5)""", owner.id)
+        mvc.perform(patchValue(101, """{"value":12}""")).andExpect(status().isConflict)
+        assertEquals(5, storedValue(101))
+        mvc.perform(patchValue(101, "{}")).andExpect(status().isConflict)
+        mvc.perform(deleteCopy(101)).andExpect(status().isNoContent)
+        assertEquals(0, countOwned())
+    }
+
+    private fun patchValue(id: Int, body: String) = patch("/api/v1/inventory/$id").auth()
+        .contentType(MediaType.APPLICATION_JSON).content(body)
+
+    private fun deleteCopy(id: Int) = delete("/api/v1/inventory/$id").auth()
+
+    private fun storedValue(id: Int): Int? = jdbc.queryForObject(
+        """SELECT "value" FROM public."User_owns_card" WHERE id = ?""", Int::class.java, id,
+    )
+
+    // Called only with the two hardcoded column names in the tests above.
+    private fun battleReference(id: Int, column: String): Int? = jdbc.queryForObject(
+        """SELECT $column FROM public."Wins" WHERE id = ?""", Int::class.java, id,
+    )
+
     private fun user(subject: String = "inventory-owner") = users.save(UserEntity(
         googleSubject = subject, email = "$subject@example.com", displayName = "Inventory Owner",
     ))
