@@ -61,3 +61,12 @@ CREATE TABLE IF NOT EXISTS public."Wins" (
     CONSTRAINT fk_wins_losing_card FOREIGN KEY (losingcard)
         REFERENCES public."User_owns_card"(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS public.card_art (
+    card_id INTEGER PRIMARY KEY
+        REFERENCES public."Card"(id) ON DELETE CASCADE,
+    png_bytes BYTEA NOT NULL,
+    CONSTRAINT card_art_size CHECK (
+        octet_length(png_bytes) BETWEEN 1 AND 1048576
+    )
+);

@@ -96,7 +96,25 @@ fun HomeScreen(
                         label = "My Cards",
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            openScreen(onNavigateToYourCards, "My Cards")
+                            when (cardsCreated) {
+                                null -> {
+                                    scope.launch {
+                                        snackbar.showSnackbar(
+                                            "Couldn't check your cards yet. Please try again."
+                                        )
+                                    }
+                                }
+
+                                0 -> {
+                                    scope.launch {
+                                        snackbar.showSnackbar("Create a card first!")
+                                    }
+                                }
+
+                                else -> {
+                                    openScreen(onNavigateToYourCards, "My Cards")
+                                }
+                            }
                         },
                     )
                 }

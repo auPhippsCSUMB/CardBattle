@@ -1,16 +1,12 @@
 package com.example.cardbattle.ui.cards
 
 import android.graphics.BitmapFactory
-import android.util.Base64
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,91 +20,190 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.cardbattle.data.local.LocalCard
-import com.example.cardbattle.data.remote.CardType
+import com.example.cardbattle.data.remote.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.example.cardbattle.data.local.LocalDeck
+
+private data class LibraryTile(
+    val key: String,
+    val card: CardResponse,
+    val ownership: ApiInventoryEntry? = null,
+)
+
+internal fun cardApiError(error: Exception): String =
+    when (error) {
+        is BackendHttpException -> when (error.statusCode) {
+            400 ->
+                "The server rejected this request. Check the entered values."
+
+            401 ->
+                "Your sign-in expired. Log out and sign in again."
+
+            403 ->
+                "You do not have permission to do that."
+
+            404 ->
+                "The requested card, deck, or artwork was not found."
+
+            409 ->
+                "This item is still referenced by other records. " +
+                        "Remove it from decks first. " +
+                        "Battle history may also prevent deletion."
+
+            413 ->
+                "The drawing is too large. The maximum is 1 MiB."
+
+            else ->
+                "The server returned HTTP ${error.statusCode}. Try again."
+        }
+
+        else ->
+            error.message ?: "The request failed. Please try again."
+    }
+
+internal fun cardClassColor(type: CardType): Color =
+    when (type) {
+        CardType.WARRIOR -> Color(0xFF963D45)
+        CardType.BRAWLER -> Color(0xFF925027)
+        CardType.RANGER -> Color(0xFF326448)
+        CardType.MAGE -> Color(0xFF69469B)
+        CardType.ROGUE -> Color(0xFF364C68)
+    }
 
 @Composable
 fun MyCardsScreen(
+    api: CardBattleClient,
+    repository: CardRepository,
+    userId: Long,
     onBack: () -> Unit,
-    loadCards: suspend () -> List<LocalCard>,
-    onEditCard: (LocalCard) -> Unit,
-    onDeleteCard: suspend (String) -> Unit,
-    loadDecks: suspend () -> List<LocalDeck>,
-    onSaveDeck: suspend (LocalDeck) -> Unit,
-    onDeleteDeck: suspend (Int) -> Unit,
+    onEditCard: suspend (CardResponse) -> Unit,
+    onCardDeleted: (Long) -> Unit,
 ) {
-    var cards by remember { mutableStateOf<List<LocalCard>>(emptyList()) }
+    var inventory by remember {
+        mutableStateOf<List<ApiInventoryEntry>>(emptyList())
+    }
+
+    var authored by remember {
+        mutableStateOf<List<CardResponse>>(emptyList())
+    }
+
+    var decks by remember {
+        mutableStateOf<List<ApiDeck>>(emptyList())
+    }
+
     var loading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var selectedCard by remember { mutableStateOf<LocalCard?>(null) }
-    var reload by remember { mutableStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableIntStateOf(0) }
+    var selected by remember { mutableStateOf<LibraryTile?>(null) }
 
-
-    val currentLoader by rememberUpdatedState(loadCards)
-    val snackbar = remember { SnackbarHostState() }
+    val editor = remember { DeckEditorState() }
     val scope = rememberCoroutineScope()
 
-    var deleteTarget by remember { mutableStateOf<LocalCard?>(null) }
-    var deleting by remember { mutableStateOf(false) }
-    var deleteError by remember { mutableStateOf<String?>(null) }
-    val deckEditor = remember { DeckEditorState() }
-
-    LaunchedEffect(reload) {
+    LaunchedEffect(userId, refresh) {
         loading = true
-        errorMessage = null
+        error = null
 
         try {
-            cards = currentLoader()
-                .asReversed()
-                .sortedByDescending { it.createdAt }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            errorMessage = "Could not load your cards. Please try again."
+            val loadedAuthored = repository.loadAuthoredCards()
+            val loadedInventory = repository.loadInventory(userId)
+            val loadedDecks = repository.loadDecks(userId)
+
+            val resolvedInventory = loadedInventory.map { entry ->
+                if (entry.card != null) {
+                    entry
+                } else {
+                    entry.copy(
+                        card = api.getCatalogCard(entry.cardId)
+                    )
+                }
+            }
+
+            authored = loadedAuthored
+            inventory = resolvedInventory
+            decks = loadedDecks
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            error = cardApiError(failure)
         } finally {
             loading = false
         }
     }
 
-    fun showDeckMessage(starter: Boolean) {
+    BackHandler(enabled = busy || editor.busy) {}
+
+    fun perform(action: suspend () -> Unit) {
+        if (busy || editor.busy) return
+
+        busy = true
+        error = null
+
         scope.launch {
-            snackbar.showSnackbar(
-                if (starter) {
-                    "Your starter deck is coming soon."
-                } else {
-                    "Deck creation is coming soon."
-                }
+            try {
+                action()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                error = cardApiError(failure)
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    val ownedTiles = inventory.mapNotNull { owned ->
+        owned.card?.let { card ->
+            LibraryTile(
+                key = "owned:${owned.id}",
+                card = card,
+                ownership = owned,
             )
         }
     }
 
+    val ownedDesignIds = ownedTiles
+        .map { it.card.id }
+        .toSet()
+
+    // Include authored designs that do not currently have an owned copy.
+    // This also keeps designs from a partially completed save accessible.
+    val createdWithoutCopy = authored
+        .filterNot { it.id in ownedDesignIds }
+        .map { card ->
+            LibraryTile(
+                key = "created:${card.id}",
+                card = card,
+            )
+        }
+
+    // Decks accept owned inventory copies, so only those appear
+    // while the deck editor is open.
+    val tiles = (
+            ownedTiles +
+                    if (editor.isOpen) emptyList() else createdWithoutCopy
+            ).sortedByDescending { it.card.id }
+
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { innerPadding ->
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(padding)
+                .padding(horizontal = 12.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(
-                    enabled = !deckEditor.busy,
+                    enabled = !busy && !editor.busy,
                     onClick = {
-                        if (deckEditor.isOpen) {
-                            deckEditor.close()
+                        if (editor.isOpen) {
+                            editor.close()
+                            refresh++
                         } else {
                             onBack()
                         }
@@ -118,322 +213,315 @@ fun MyCardsScreen(
                 }
 
                 Text(
-                    text = "My Cards",
+                    text = "My cards",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 8.dp),
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                TextButton(
+                    enabled = !loading &&
+                            !busy &&
+                            !editor.busy &&
+                            !editor.isOpen,
+                    onClick = { refresh++ },
+                ) {
+                    Text("Refresh")
+                }
+            }
+
+            if (loading) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                DeckSection(
-                    cards = cards,
-                    editor = deckEditor,
-                    loadDecks = loadDecks,
-                    onSaveDeck = onSaveDeck,
-                    onDeleteDeck = onDeleteDeck,
-                )
-            }
-
-            HorizontalDivider()
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+            error?.let { message ->
                 Text(
-                    text = if (loading || errorMessage != null) {
-                        "Your cards"
+                    text = message,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+
+                if (!loading && selected == null) {
+                    TextButton(
+                        enabled = !busy && !editor.busy,
+                        onClick = { refresh++ },
+                    ) {
+                        Text("Retry loading")
+                    }
+                }
+            }
+
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 20.dp),
+            ) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    if (!loading) {
+                        DeckSection(
+                            api = api,
+                            userId = userId,
+                            decks = decks,
+                            inventory = inventory,
+                            editor = editor,
+                            onChanged = { refresh++ },
+                        )
+                    }
+                }
+
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        text = "Your cards",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+
+                if (!loading && error == null && tiles.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = "Create some cards to get started!",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+
+                items(
+                    items = tiles,
+                    key = { it.key },
+                ) { tile ->
+                    val gestures = if (tile.ownership != null) {
+                        Modifier.deckCardGestures(
+                            copy = tile.ownership,
+                            editor = editor,
+                        )
                     } else {
-                        "Your cards (${cards.size})"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-
-                Text(
-                    text = "Newest first",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            when {
-                loading -> {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
+                        Modifier
                     }
-                }
 
-                errorMessage != null -> {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            text = errorMessage.orEmpty(),
-                            textAlign = TextAlign.Center,
-                        )
-
-                        TextButton(onClick = { reload++ }) {
-                            Text("Try again")
-                        }
-                    }
-                }
-
-                cards.isEmpty() -> {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = "No cards yet.\n" +
-                                    "Use New Cards on Home to create your first one!",
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                else -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(4),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(bottom = 20.dp),
-                    ) {
-                        items(
-                            items = cards,
-                            key = { it.id },
-                        ) { card ->
-                            Box(
-                                modifier = Modifier.deckCardGestures(
-                                    cardId = card.id,
-                                    editor = deckEditor,
-                                ),
-                            ) {
-                                CollectionCard(
-                                    card = card,
-                                    onClick = {
-                                        if (deckEditor.isOpen) {
-                                            deckEditor.addCard(card.id)
-                                        } else {
-                                            selectedCard = card
-                                        }
-                                    },
-                                )
+                    CollectionCard(
+                        card = tile.card,
+                        api = api,
+                        modifier = gestures,
+                        enabled = !busy && !editor.busy,
+                        onClick = {
+                            if (editor.isOpen) {
+                                tile.ownership?.let {
+                                    editor.addCard(it)
+                                }
+                            } else {
+                                error = null
+                                selected = tile
                             }
-                        }
-                    }
+                        },
+                    )
                 }
             }
         }
     }
 
-    selectedCard?.let { card ->
-        val color = collectionCardColor(card.type)
+    selected?.let { tile ->
+        var card by remember(tile.key) {
+            mutableStateOf(tile.card)
+        }
+
+        var stats by remember(tile.key) {
+            mutableStateOf<ApiStats?>(null)
+        }
+
+        var detailError by remember(tile.key) {
+            mutableStateOf<String?>(null)
+        }
+
+        var deleteAction by remember(tile.key) {
+            mutableStateOf<String?>(null)
+        }
+
+        LaunchedEffect(tile.key) {
+            try {
+                card = if (tile.card.authorId == userId) {
+                    api.getMyCard(tile.card.id)
+                } else {
+                    api.getCatalogCard(tile.card.id)
+                }
+
+                stats = api.cardStats(card.id)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                detailError = cardApiError(failure)
+            }
+        }
 
         AlertDialog(
-            onDismissRequest = { selectedCard = null },
-            containerColor = color,
-            titleContentColor = Color.White,
-            textContentColor = Color.White,
+            onDismissRequest = {
+                if (!busy) {
+                    selected = null
+                    error = null
+                }
+            },
             title = {
                 Text(
                     text = card.name,
                     modifier = Modifier.fillMaxWidth(),
-                    fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
             },
             text = {
                 Column(
-                    modifier = Modifier
-                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
-                    LocalCardArt(
+                    RemoteCardArt(
                         card = card,
-                        fullSize = true,
+                        api = api,
                     )
 
                     Text(
                         text = card.type.label,
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onEditCard(card)
-                        selectedCard = null
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = Color.White
-                    ),
-                ) {
-                    Text("Edit")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            selectedCard = null
-                            deleteTarget = card
-                            deleteError = null
-                        },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = Color.White
-                        ),
-                    ) {
-                        Text("Delete")
-                    }
-                }
-            },
-        )
-    }
-    deleteTarget?.let { card ->
-        AlertDialog(
-            onDismissRequest = {
-                if (!deleting) deleteTarget = null
-            },
-            title = { Text("Delete card?") },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        "\"${card.name}\" will be deleted from this device. " +
-                                "This cannot be undone."
                     )
 
-                    deleteError?.let {
+                    stats?.let {
+                        Text("${it.wins} wins · ${it.losses} losses")
+                    }
+
+                    detailError?.let {
                         Text(
-                            it,
+                            text = it,
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !deleting,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    ),
-                    onClick = {
-                        if (!deleting) {
-                            deleting = true
-                            deleteError = null
 
-                            scope.launch {
-                                try {
-                                    onDeleteCard(card.id)
-                                    cards = cards.filterNot {
-                                        it.id == card.id
-                                    }
-                                    deleteTarget = null
-                                } catch (error: CancellationException) {
-                                    throw error
-                                } catch (error: Exception) {
-                                    deleteError = error.message
-                                        ?: "Could not delete the card. Try again."
-                                } finally {
-                                    deleting = false
+                    error?.let {
+                        Text(
+                            text = it,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+
+                    if (card.authorId == userId) {
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                perform {
+                                    onEditCard(card)
+                                    selected = null
                                 }
-                            }
+                            },
+                        ) {
+                            Text(
+                                if (busy) "Opening…" else "Edit card"
+                            )
                         }
-                    },
-                ) {
-                    Text(if (deleting) "Deleting…" else "Delete")
+                    }
+
+                    if (tile.ownership != null) {
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                error = null
+                                deleteAction = "copy"
+                            },
+                        ) {
+                            Text("Remove from collection")
+                        }
+                    } else if (card.authorId == userId) {
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                error = null
+                                deleteAction = "design"
+                            },
+                        ) {
+                            Text("Delete card design")
+                        }
+                    }
                 }
             },
-            dismissButton = {
-                TextButton(
-                    enabled = !deleting,
-                    onClick = {
-                        deleteTarget = null
-                        selectedCard = card
-                    },
-                ) {
-                    Text("Cancel")
-                }
-            },
+            confirmButton = {},
         )
-    }
-}
 
-@Composable
-private fun DeckSlot(
-    title: String,
-    subtitle: String,
-    starter: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 120.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (starter) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = if (starter) "3 cards" else "+",
-                style = if (starter) {
-                    MaterialTheme.typography.titleMedium
-                } else {
-                    MaterialTheme.typography.headlineSmall
+        deleteAction?.let { action ->
+            AlertDialog(
+                onDismissRequest = {
+                    if (!busy) deleteAction = null
                 },
-                fontWeight = FontWeight.Bold,
-            )
+                title = {
+                    Text(
+                        if (action == "copy") {
+                            "Remove owned copy?"
+                        } else {
+                            "Delete card design?"
+                        }
+                    )
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            if (action == "copy") {
+                                "This removes your owned copy. " +
+                                        "If you created the design, it remains " +
+                                        "in My Cards without an owned copy."
+                            } else {
+                                "This deletes the underlying design. " +
+                                        "Owned copies or battle history " +
+                                        "may block deletion."
+                            }
+                        )
 
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-            )
+                        error?.let {
+                            Text(
+                                text = it,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !busy,
+                        onClick = {
+                            perform {
+                                if (action == "copy") {
+                                    api.deleteOwnership(
+                                        checkNotNull(tile.ownership).id
+                                    )
+                                } else {
+                                    api.deleteCard(card.id)
+                                    onCardDeleted(card.id)
+                                }
 
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
+                                deleteAction = null
+                                selected = null
+                                refresh++
+                            }
+                        },
+                    ) {
+                        Text(
+                            if (busy) "Deleting…" else "Delete"
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !busy,
+                        onClick = { deleteAction = null },
+                    ) {
+                        Text("Cancel")
+                    }
+                },
             )
         }
     }
@@ -441,115 +529,117 @@ private fun DeckSlot(
 
 @Composable
 internal fun CollectionCard(
-    card: LocalCard,
+    card: CardResponse,
+    api: CardBattleClient,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(
-            containerColor = collectionCardColor(card.type),
+            containerColor = cardClassColor(card.type),
             contentColor = Color.White,
         ),
     ) {
         Column(
             modifier = Modifier.padding(5.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
                 text = card.name,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp),
                 fontSize = 11.sp,
-                lineHeight = 13.sp,
+                lineHeight = 14.sp,
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                minLines = 2,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
 
-            LocalCardArt(card = card)
+            RemoteCardArt(
+                card = card,
+                api = api,
+            )
 
             Text(
                 text = card.type.label,
-                modifier = Modifier.fillMaxWidth(),
                 fontSize = 10.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Bold,
             )
         }
     }
 }
 
 @Composable
-private fun LocalCardArt(
-    card: LocalCard,
-    fullSize: Boolean = false,
+internal fun RemoteCardArt(
+    card: CardResponse,
+    api: CardBattleClient,
+    modifier: Modifier = Modifier,
 ) {
-    val image by produceState<ImageBitmap?>(
-        initialValue = null,
-        key1 = card.pngBase64,
-        key2 = fullSize,
-    ) {
-        value = withContext(Dispatchers.Default) {
-            try {
-                val bytes = Base64.decode(
-                    card.pngBase64,
-                    Base64.DEFAULT,
-                )
+    var image by remember(card.id, card.imgURL) {
+        mutableStateOf<ImageBitmap?>(null)
+    }
 
-                val options = BitmapFactory.Options().apply {
-                    inSampleSize = if (fullSize) 1 else 4
-                }
+    var failed by remember(card.id, card.imgURL) {
+        mutableStateOf(false)
+    }
 
-                BitmapFactory.decodeByteArray(
-                    bytes,
-                    0,
-                    bytes.size,
-                    options,
-                )?.asImageBitmap()
-            } catch (error: IllegalArgumentException) {
-                null
+    LaunchedEffect(card.id, card.imgURL) {
+        if (card.imgURL.isNullOrBlank()) return@LaunchedEffect
+
+        try {
+            val bytes = api.downloadArt(card.id)
+
+            image = withContext(Dispatchers.Default) {
+                requireNotNull(
+                    BitmapFactory.decodeByteArray(
+                        bytes,
+                        0,
+                        bytes.size,
+                    )
+                ) {
+                    "Artwork could not be decoded."
+                }.asImageBitmap()
             }
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            failed = true
         }
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .clip(RoundedCornerShape(6.dp))
             .background(Color.White),
         contentAlignment = Alignment.Center,
     ) {
-        val bitmap = image
+        val loaded = image
 
-        if (bitmap != null) {
+        if (loaded != null) {
             Image(
-                bitmap = bitmap,
+                bitmap = loaded,
                 contentDescription = "${card.name} artwork",
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Text(
-                text = "Art",
-                color = Color.Gray,
+                text = if (failed) "Art unavailable" else "Art",
+                color = Color.DarkGray,
                 fontSize = 10.sp,
+                textAlign = TextAlign.Center,
             )
         }
     }
 }
-
-private fun collectionCardColor(type: CardType): Color =
-    when (type) {
-        CardType.WARRIOR -> Color(0xFF963D45)
-        CardType.BRAWLER -> Color(0xFF925027)
-        CardType.RANGER -> Color(0xFF326448)
-        CardType.MAGE -> Color(0xFF69469B)
-        CardType.ROGUE -> Color(0xFF364C68)
-    }

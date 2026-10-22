@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint
 import android.graphics.Rect
-import android.util.Base64
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -35,15 +34,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
-import com.example.cardbattle.data.local.LocalCard
 import com.example.cardbattle.data.remote.CardType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.util.UUID
 import kotlin.math.roundToInt
+import androidx.activity.compose.BackHandler
+import com.example.cardbattle.data.remote.CardResponse
+import com.example.cardbattle.data.remote.NewCardSaveState
 
 data class EditorStroke(
     val color: Color,
@@ -51,9 +51,11 @@ data class EditorStroke(
 )
 
 class CardEditorDraft(
-    val id: String = UUID.randomUUID().toString(),
-    val isEditing: Boolean = false,
+    val cardId: Long? = null,
 ) {
+    val isEditing: Boolean
+        get() = cardId != null
+
     val started = mutableStateOf(isEditing)
     val name = mutableStateOf("")
     val selectedType = mutableStateOf<CardType?>(null)
@@ -61,18 +63,18 @@ class CardEditorDraft(
     val basePng = mutableStateOf<ByteArray?>(null)
     val strokes = mutableStateListOf<EditorStroke>()
 
+
+    val saveState = NewCardSaveState()
+
     companion object {
-        fun fromCard(card: LocalCard): CardEditorDraft =
-            CardEditorDraft(
-                id = card.id,
-                isEditing = true,
-            ).apply {
+        fun fromCard(
+            card: CardResponse,
+            pngBytes: ByteArray?,
+        ): CardEditorDraft =
+            CardEditorDraft(cardId = card.id).apply {
                 name.value = card.name
                 selectedType.value = card.type
-                basePng.value = Base64.decode(
-                    card.pngBase64,
-                    Base64.DEFAULT,
-                )
+                basePng.value = pngBytes
             }
     }
 }
@@ -81,7 +83,7 @@ class CardDraftsViewModel : ViewModel() {
     var newDraft by mutableStateOf(CardEditorDraft())
         private set
 
-    val editDrafts = mutableStateMapOf<String, CardEditorDraft>()
+    val editDrafts = mutableStateMapOf<Long, CardEditorDraft>()
 
     private var ownerId: Int? = null
 
@@ -92,9 +94,12 @@ class CardDraftsViewModel : ViewModel() {
         }
     }
 
-    fun openEdit(card: LocalCard) {
+    fun openEdit(
+        card: CardResponse,
+        pngBytes: ByteArray?,
+    ) {
         editDrafts.getOrPut(card.id) {
-            CardEditorDraft.fromCard(card)
+            CardEditorDraft.fromCard(card, pngBytes)
         }
     }
 
@@ -113,8 +118,7 @@ class CardDraftsViewModel : ViewModel() {
 fun CreateCardScreen(
     draft: CardEditorDraft,
     onBack: () -> Unit,
-    onSaveLocal: suspend (
-        id: String,
+    onSave: suspend (
         name: String,
         type: CardType,
         pngBytes: ByteArray,
@@ -130,6 +134,9 @@ fun CreateCardScreen(
     val scope = rememberCoroutineScope()
     var classMenuOpen by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    BackHandler(enabled = busy) {
+        // Hopefully will keep the screen open while a save is running
+    }
     var previewPng by remember { mutableStateOf<ByteArray?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -601,8 +608,7 @@ fun CreateCardScreen(
 
                             scope.launch {
                                 try {
-                                    onSaveLocal(
-                                        draft.id,
+                                    onSave(
                                         cardName,
                                         type,
                                         png,
@@ -611,8 +617,7 @@ fun CreateCardScreen(
                                 } catch (error: CancellationException) {
                                     throw error
                                 } catch (error: Exception) {
-                                    errorMessage =
-                                        "Could not save. Please try again."
+                                    errorMessage = cardApiError(error)
                                 } finally {
                                     busy = false
                                 }
@@ -623,7 +628,7 @@ fun CreateCardScreen(
                     Text(
                         if (busy) "Saving…"
                         else if (draft.isEditing) "Save changes"
-                        else "Save locally"
+                        else "Save card"
                     )
                 }
             },
