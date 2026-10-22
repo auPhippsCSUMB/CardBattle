@@ -106,7 +106,27 @@ data class ApiBattleRequest(
     val winningCard: Long,
     val losingCard: Long,
 )
+@Serializable
+data class ApiBattleDeck(
+    val deck: ApiDeck,
+    val cards: List<ApiDeckEntry>,
+)
+@Serializable
+data class ApiDeckBattleRequest(
+    val requestId: String,
+    val playerDeckId: Long,
+    val opponentDeckId: Long,
+)
 
+@Serializable
+data class ApiDeckBattleResponse(
+    val requestId: String,
+    val player: ApiBattleDeck,
+    val opponent: ApiBattleDeck,
+    val playerScore: Int,
+    val opponentScore: Int,
+    val outcome: String,
+)
 class CardBattleClient(
     private val tokenProvider: () -> String,
     private val backendUrl: String =
@@ -115,6 +135,7 @@ class CardBattleClient(
     private val json = Json {
         ignoreUnknownKeys = true
     }
+
 
     companion object {
         private val JSON =
@@ -131,7 +152,20 @@ class CardBattleClient(
             .build()
     }
 
-
+    suspend fun battleDeck(deckId: Long): ApiBattleDeck =
+        read(
+            "GET",
+            "/api/v1/battle-decks/$deckId",
+        )
+    suspend fun playDeckBattle(
+        request: ApiDeckBattleRequest,
+    ): ApiDeckBattleResponse =
+        read(
+            method = "POST",
+            path = "/api/v1/deck-battles",
+            body = json.encodeToString(request),
+            expected = 201,
+        )
     suspend fun signIn(): UserProfile =
         signInAndGetUser(tokenProvider(), backendUrl)
 

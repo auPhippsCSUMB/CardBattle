@@ -17,13 +17,16 @@ import com.example.cardbattle.ui.home.HomeScreen
 import com.example.cardbattle.ui.login.LoginScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
+import com.example.cardbattle.ui.battle.BattleScreen
+import com.example.cardbattle.ui.battle.BattleViewModel
 
 @Serializable
 data object LoginRoute
 
 @Serializable
 data object HomeRoute
-
+@Serializable
+data object BattleRoute
 @Serializable
 data object CreateCardRoute
 
@@ -35,12 +38,13 @@ data class EditCardRoute(val cardId: Long)
 
 class AppSessionViewModel : ViewModel() {
     val auth = AuthSession()
-
+    var statsRevision by mutableIntStateOf(0)
     var user by mutableStateOf<UserProfile?>(null)
 
     fun clear() {
         auth.clear()
         user = null
+        statsRevision = 0
     }
 }
 
@@ -122,7 +126,7 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                 mutableStateOf<ApiStats?>(null)
             }
 
-            LaunchedEffect(user?.id) {
+            LaunchedEffect(user?.id, session.statsRevision) {
                 val userId = user?.id ?: return@LaunchedEffect
 
                 try {
@@ -158,7 +162,11 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                         throw failure
                     }
                 },
-
+                onNavigateToBattle = {
+                    navController.navigate(BattleRoute) {
+                        launchSingleTop = true
+                    }
+                },
                 onNavigateToNewCards = {
                     navController.navigate(CreateCardRoute) {
                         launchSingleTop = true
@@ -173,6 +181,34 @@ fun AppNavHost(modifier: Modifier = Modifier) {
 
                 onLogout = { logOut() },
             )
+        }
+        composable<BattleRoute> { entry ->
+            val userId = session.user?.id
+
+            if (userId == null) {
+                LaunchedEffect(Unit) {
+                    logOut()
+                }
+            } else {
+                val battleState = remember(entry) {
+                    ViewModelProvider(entry)[BattleViewModel::class.java]
+                }
+                LaunchedEffect(battleState.statsRefreshCounter) {
+                    if (battleState.statsRefreshCounter > 0) {
+                        session.statsRevision++
+                    }
+                }
+
+                BattleScreen(
+                    api = api,
+                    repository = repository,
+                    userId = userId.toLong(),
+                    state = battleState,
+                    onBack = {
+                        navController.popBackStack()
+                    },
+                )
+            }
         }
 
         composable<CreateCardRoute> {
@@ -248,16 +284,25 @@ fun AppNavHost(modifier: Modifier = Modifier) {
 
         composable<EditCardRoute> { entry ->
             val route = entry.toRoute<EditCardRoute>()
-            val draft = drafts.editDrafts[route.cardId]
+            val draft = remember(entry) {
+                drafts.editDrafts[route.cardId]
+            }
 
             if (draft == null) {
-                LaunchedEffect(route.cardId) {
-                    navController.popBackStack()
+                LaunchedEffect(entry) {
+                    navController.navigate(MyCardsRoute) {
+                        popUpTo<EditCardRoute> {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
                 }
             } else {
                 CreateCardScreen(
                     draft = draft,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        navController.popBackStack()
+                    },
 
                     onSave = { name, type, pngBytes ->
                         repository.saveEditedDrawing(
@@ -267,8 +312,15 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                             pngBytes = pngBytes,
                         )
 
+
+                        navController.navigate(MyCardsRoute) {
+                            popUpTo<MyCardsRoute> {
+                                inclusive = true
+                            }
+                            launchSingleTop = true
+                        }
+
                         drafts.editDrafts.remove(route.cardId)
-                        returnHome()
                     },
                 )
             }
