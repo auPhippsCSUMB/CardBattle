@@ -284,16 +284,25 @@ fun AppNavHost(modifier: Modifier = Modifier) {
 
         composable<EditCardRoute> { entry ->
             val route = entry.toRoute<EditCardRoute>()
-            val draft = drafts.editDrafts[route.cardId]
+            val draft = remember(entry) {
+                drafts.editDrafts[route.cardId]
+            }
 
             if (draft == null) {
-                LaunchedEffect(route.cardId) {
-                    navController.popBackStack()
+                LaunchedEffect(entry) {
+                    navController.navigate(MyCardsRoute) {
+                        popUpTo<EditCardRoute> {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
                 }
             } else {
                 CreateCardScreen(
                     draft = draft,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        navController.popBackStack()
+                    },
 
                     onSave = { name, type, pngBytes ->
                         repository.saveEditedDrawing(
@@ -303,8 +312,15 @@ fun AppNavHost(modifier: Modifier = Modifier) {
                             pngBytes = pngBytes,
                         )
 
+
+                        navController.navigate(MyCardsRoute) {
+                            popUpTo<MyCardsRoute> {
+                                inclusive = true
+                            }
+                            launchSingleTop = true
+                        }
+
                         drafts.editDrafts.remove(route.cardId)
-                        returnHome()
                     },
                 )
             }
