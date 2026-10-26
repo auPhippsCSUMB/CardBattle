@@ -1,5 +1,14 @@
 ![CI](https://github.com/auPhippsCSUMB/CardBattle/actions/workflows/ci.yml/badge.svg)
 
+## Project links
+
+- [Live API health check](https://cardbattle-e5vf.onrender.com/actuator/health)
+- [Swagger UI](https://cardbattle-e5vf.onrender.com/swagger-ui.html)
+- [OpenAPI JSON](https://cardbattle-e5vf.onrender.com/v3/api-docs)
+- [Android APK — download from release Assets](https://github.com/auPhippsCSUMB/CardBattle/releases/tag/1.0)
+- [Authentication sequence diagram](docs/Auth_sequence.md)
+
+
 # CardBattle
 
 - `api-backend/`: Spring Boot API, Java 21, and its own Gradle wrapper.
