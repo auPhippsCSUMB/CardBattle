@@ -11,14 +11,24 @@ class SecurityConfig {
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
-                .csrf { csrf -> csrf.disable() }
-                .authorizeHttpRequests { auth ->
-                    auth.requestMatchers("/actuator/health")
-                            .permitAll()
-                            .anyRequest()
-                            .authenticated()
+                .csrf { csrf ->
+                    csrf.disable()
                 }
-                .oauth2ResourceServer { oauth2 -> oauth2.jwt {} }
+                .authorizeHttpRequests { auth ->
+                    auth.requestMatchers(
+                            "/actuator/health",
+                            "/swagger-ui.html",
+                            "/swagger-ui/**",
+                            "/v3/api-docs",
+                            "/v3/api-docs/**",
+                            "/v3/api-docs.yaml",
+                    ).permitAll()
+
+                    auth.anyRequest().authenticated()
+                }
+                .oauth2ResourceServer { oauth2 ->
+                    oauth2.jwt {}
+                }
 
         return http.build()
     }
