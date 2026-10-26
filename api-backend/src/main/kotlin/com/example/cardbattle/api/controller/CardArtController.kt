@@ -16,9 +16,20 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import javax.imageio.ImageIO
 import javax.imageio.stream.MemoryCacheImageInputStream
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.media.Content
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.parameters.RequestBody as SwaggerRequestBody
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.tags.Tag
 
 data class CardArtResponse(
         val imgURL: String,
+)
+
+@Tag(
+        name = "Card artwork",
+        description = "Upload and retrieve card drawings.",
 )
 
 @RestController
@@ -42,6 +53,39 @@ class CardArtController(
         )
     }
 
+    @Operation(
+            summary = "Upload or replace a card's drawing",
+            description = "Only the card's author can upload artwork. " +
+                    "Send a raw PNG body, at most 1 MiB and 1024 × 1024 pixels. " +
+                    "Returns the URL used to retrieve the saved drawing.",
+            requestBody = SwaggerRequestBody(
+                    required = true,
+                    description = "Raw PNG image bytes",
+                    content = [
+                        Content(
+                                mediaType = "image/png",
+                                schema = Schema(
+                                        type = "string",
+                                        format = "binary",
+                                ),
+                        ),
+                    ],
+            ),
+            responses = [
+                ApiResponse(
+                        responseCode = "200",
+                        description = "Artwork saved; retrieval URL returned",
+                        content = [
+                            Content(
+                                    mediaType = "application/json",
+                                    schema = Schema(
+                                            implementation = CardArtResponse::class,
+                                    ),
+                            ),
+                        ],
+                ),
+            ],
+    )
     @PutMapping(
             "/{cardId}/art",
             consumes = ["image/png"],
@@ -80,6 +124,26 @@ class CardArtController(
         )
     }
 
+    @Operation(
+            summary = "Download a card's drawing",
+            description = "Returns the stored PNG. Requires authentication. " +
+                    "Returns 404 when no drawing exists for the requested card.",
+            responses = [
+                ApiResponse(
+                        responseCode = "200",
+                        description = "PNG artwork returned",
+                        content = [
+                            Content(
+                                    mediaType = "image/png",
+                                    schema = Schema(
+                                            type = "string",
+                                            format = "binary",
+                                    ),
+                            ),
+                        ],
+                ),
+            ],
+    )
     @GetMapping(
             "/{cardId}/art",
             produces = ["image/png"],
